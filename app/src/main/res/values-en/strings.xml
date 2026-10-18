@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ColorReader</string>
+    <string name="tts_channel_name">Read aloud</string>
+    <string name="tts_channel_desc">Shows reading progress and controls</string>
+</resources>

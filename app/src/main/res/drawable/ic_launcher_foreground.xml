@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- an open book, ColorOS superellipse flavoured -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,36c-6.5,-5.2 -15.2,-7.6 -24,-7.6c-2.4,0 -4.3,1.9 -4.3,4.3v35.9c0,2.4 1.9,4.3 4.3,4.3c8.1,0 16.3,2.1 22.4,6.6c0.9,0.7 2.2,0.7 3.2,0c6.1,-4.5 14.3,-6.6 22.4,-6.6c2.4,0 4.3,-1.9 4.3,-4.3V32.7c0,-2.4 -1.9,-4.3 -4.3,-4.3C69.2,28.4 60.5,30.8 54,36zM54,42.4c5.6,-4.1 13.4,-6.3 21.6,-6.5v30.2c-7.6,0.3 -14.6,2.2 -19.9,5.6V43.2c0,-0.3 -0.4,-0.6 -0.7,-0.4c-0.3,0.2 -0.7,0.2 -1,0zM32.4,35.9c8.2,0.2 16,2.4 21.6,6.5V71.7c-5.3,-3.4 -12.3,-5.3 -19.9,-5.6V35.9z" />
+</vector>
