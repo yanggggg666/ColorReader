@@ -27,6 +27,9 @@ import com.oceanreader.reader.HighlightSpan
 import com.oceanreader.reader.ReaderStyle
 import com.oceanreader.reader.TextPaginator
 import com.oceanreader.tts.SpeechCursor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 /** Default highlight palette (matches the settings screen chips). */
 val HighlightColors: List<Int> = listOf(
@@ -57,6 +60,11 @@ fun TextPageView(
     val pageCount = paginator.pageCount
     var dragOffset by remember { mutableFloatStateOf(0f) }
 
+    // Any committed page change invalidates an in-flight drag offset; without
+    // this a cancelled gesture shifts every later page down and eats its top
+    // lines (pages look like they hold fewer and fewer lines).
+    LaunchedEffect(page) { dragOffset = 0f }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -74,6 +82,9 @@ fun TextPageView(
                         if (target != page) onPageChanged(target, paginator.startOf(target))
                         dragOffset = 0f
                     },
+                    // A cancelled gesture (fling interception, pointer up outside)
+                    // used to leave the offset dangling and shift every later page.
+                    onDragCancel = { dragOffset = 0f },
                     onVerticalDrag = { _, amount -> dragOffset += amount }
                 )
             }
@@ -187,10 +198,17 @@ fun TextPageView(
 }
 
 /**
- * Renders a PDF page full-bleed (cover): the page keeps its aspect ratio and
- * fills the screen edge to edge, the overflow is cropped — no letterbox bars,
- * no distortion. The bitmap is produced off the main thread by
- * [com.oceanreader.parse.pdf.PdfPageRenderer]; dark palettes invert it.
+ * Renders a PDF page as large as the screen allows without ever cutting
+ * content off:
+ *
+ *  1. the page is rasterised at its own aspect ratio (filling the screen's
+ *     smaller constraint, so nothing is stretched);
+ *  2. the page's white margins are detected and cropped away (裁白边) — this
+ *     is what actually buys back the screen area, the way WeRead/WPS do it;
+ *  3. the cropped page is fitted (contain) and centred, so left/right sides
+ *     never protrude and no band is larger than the page's own margin.
+ *
+ * Dark palettes invert the page so scanned PDFs stay readable at night.
  */
 @Composable
 fun PdfPageView(
@@ -202,12 +220,14 @@ fun PdfPageView(
 ) {
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    // Centre offset of the (possibly larger than screen) bitmap.
     var originX by remember { mutableFloatStateOf(0f) }
     var originY by remember { mutableFloatStateOf(0f) }
+    var scale by remember { mutableFloatStateOf(1f) }
     val renderer = remember(filePath) {
         com.oceanreader.parse.pdf.PdfPageRenderer(java.io.File(filePath))
     }
+
+    LaunchedEffect(page) { dragOffset = 0f }
 
     Box(
         modifier = Modifier
@@ -226,6 +246,7 @@ fun PdfPageView(
                         if (target != page) onPageChanged(target)
                         dragOffset = 0f
                     },
+                    onDragCancel = { dragOffset = 0f },
                     onVerticalDrag = { _, amount -> dragOffset += amount }
                 )
             }
@@ -238,32 +259,49 @@ fun PdfPageView(
             LaunchedEffect(page, filePath, screenW, screenH, dark) {
                 if (screenW < 1f || screenH < 1f) return@LaunchedEffect
                 val aspect = renderer.pageAspect(page).takeIf { it > 0.01f } ?: 0.707f
-                // Pick the dimension the page must fill; the other follows the
-                // page's own ratio so nothing is distorted.
-                val screenAspect = screenW / screenH
+                // Fill the tighter screen dimension; the other follows the page.
                 val bitmapW: Int
                 val bitmapH: Int
-                if (aspect >= screenAspect) {
-                    bitmapH = screenH.toInt().coerceAtLeast(1)
-                    bitmapW = (screenH * aspect).toInt().coerceAtLeast(1)
-                } else {
+                if (screenW / screenH <= aspect) {
                     bitmapW = screenW.toInt().coerceAtLeast(1)
                     bitmapH = (screenW / aspect).toInt().coerceAtLeast(1)
+                } else {
+                    bitmapH = screenH.toInt().coerceAtLeast(1)
+                    bitmapW = (screenH * aspect).toInt().coerceAtLeast(1)
                 }
-                originX = (screenW - bitmapW) / 2f
-                originY = (screenH - bitmapH) / 2f
-                bitmap = renderer.render(page, bitmapW, bitmapH)?.let {
-                    if (dark) com.oceanreader.parse.pdf.PdfTone.invert(it) else it
+
+                val rendered = renderer.render(page, bitmapW, bitmapH) ?: return@LaunchedEffect
+                val cropped = withContext(Dispatchers.Default) { autoCropWhiteMargins(rendered) }
+                // PdfTone.invert returns a copy and recycles its input.
+                val finalBitmap = if (dark) com.oceanreader.parse.pdf.PdfTone.invert(cropped) else cropped
+                if (finalBitmap !== rendered && !rendered.isRecycled) rendered.recycle()
+                bitmap = finalBitmap
+
+                // Contain-fit the (cropped) page: never crop content again.
+                val pageAspect = finalBitmap.width.toFloat() / finalBitmap.height.toFloat()
+                val drawW: Float
+                val drawH: Float
+                if (pageAspect >= screenW / screenH) {
+                    drawW = screenW
+                    drawH = screenW / pageAspect
+                } else {
+                    drawH = screenH
+                    drawW = screenH * pageAspect
                 }
+                scale = drawW / finalBitmap.width.toFloat()
+                originX = (screenW - drawW) / 2f
+                originY = (screenH - drawH) / 2f
             }
         }
 
         Canvas(modifier = Modifier.fillMaxSize()) {
             val bmp = bitmap ?: return@Canvas
+            if (bmp.isRecycled) return@Canvas
             drawIntoCanvas { canvas ->
                 val native: Canvas = canvas.nativeCanvas
                 native.save()
                 native.translate(originX, originY + dragOffset)
+                native.scale(scale, scale)
                 native.drawBitmap(bmp, 0f, 0f, null)
                 native.restore()
             }
@@ -272,6 +310,66 @@ fun PdfPageView(
 
     DisposableEffect(Unit) {
         onDispose { renderer.close() }
+    }
+}
+
+/**
+ * Detects the page's near-white border and returns a copy without it.
+ *
+ * Sampling is coarse (~240 probes on the long side) so a full page costs a
+ * few milliseconds. Returns the source bitmap untouched when the border is
+ * thin, so normal pages are never reallocated.
+ */
+private fun autoCropWhiteMargins(src: android.graphics.Bitmap, padFraction: Float = 0.015f): android.graphics.Bitmap {
+    val w = src.width
+    val h = src.height
+    if (w < 16 || h < 16) return src
+    val step = maxOf(2, minOf(w, h) / 240)
+    val paper = src.getPixel(2, 2)
+    val pr = (paper shr 16) and 0xFF
+    val pg = (paper shr 8) and 0xFF
+    val pb = paper and 0xFF
+    val tolerance = 26
+
+    var minX = w
+    var minY = h
+    var maxX = -1
+    var maxY = -1
+    var y = 0
+    while (y < h) {
+        var x = 0
+        while (x < w) {
+            val c = src.getPixel(x, y)
+            val r = (c shr 16) and 0xFF
+            val g = (c shr 8) and 0xFF
+            val b = c and 0xFF
+            if (abs(r - pr) > tolerance || abs(g - pg) > tolerance || abs(b - pb) > tolerance) {
+                if (x < minX) minX = x
+                if (x > maxX) maxX = x
+                if (y < minY) minY = y
+                if (y > maxY) maxY = y
+            }
+            x += step
+        }
+        y += step
+    }
+    // Blank page or a border thinner than the sampling grid: keep it whole.
+    if (maxX < 0 || maxY < 0) return src
+
+    val pad = (minOf(w, h) * padFraction).toInt()
+    val left = (minX - pad).coerceIn(0, w - 1)
+    val top = (minY - pad).coerceIn(0, h - 1)
+    val right = (maxX + pad).coerceIn(1, w)
+    val bottom = (maxY + pad).coerceIn(1, h)
+    val cw = right - left
+    val ch = bottom - top
+    val meaningfulX = cw < w * 0.94f
+    val meaningfulY = ch < h * 0.94f
+    if (!meaningfulX && !meaningfulY) return src
+    return try {
+        android.graphics.Bitmap.createBitmap(src, left, top, cw, ch)
+    } catch (e: Throwable) {
+        src
     }
 }
 
