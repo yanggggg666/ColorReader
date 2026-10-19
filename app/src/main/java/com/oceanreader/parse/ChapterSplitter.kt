@@ -49,6 +49,43 @@ object ChapterSplitter {
 
     private data class Hit(val line: Int, val title: String, val offset: Int)
 
+    /**
+     * Merges consecutive chapters until each one stands on at least
+     * [minChars] of body.
+     *
+     * EPUB and DOCX produce one chapter per source section, and badly
+     * converted books put a few lines in each section — a chapter that is
+     * shorter than one screen then wastes a whole page per section (the
+     * "one page shows a few lines" bug). Merging keeps the flow full without
+     * touching a single character offset. WeRead avoids the symptom by
+     * paginating the whole book as one continuous stream; merging is the
+     * same effect for chapter-at-a-time readers.
+     */
+    fun mergeUp(body: String, chapters: List<ChapterRef>, minChars: Int = 1200): List<ChapterRef> {
+        if (chapters.size < 2 || minChars <= 0) return chapters
+        val total = body.length.toLong()
+        val out = ArrayList<ChapterRef>(chapters.size)
+        var i = 0
+        while (i < chapters.size) {
+            val first = chapters[i]
+            if (first.startOffset >= total) {
+                i++
+                continue
+            }
+            var end = (first.startOffset + first.length).coerceAtMost(total)
+            var j = i
+            while (end - first.startOffset < minChars && j + 1 < chapters.size) {
+                j++
+                val next = chapters[j]
+                end = (next.startOffset + next.length).coerceAtMost(total)
+            }
+            val length = (end - first.startOffset).coerceAtLeast(1L)
+            val title = if (j == i) first.title else first.title.ifBlank { chapters[j].title }
+            out.add(ChapterRef(out.size, title, first.startOffset, length))
+            i = j + 1
+        }
+        return if (out.isEmpty()) chapters else out
+    }
     private fun scanExplicit(body: String, forceMarkdown: Boolean): List<Hit> {
         val hits = ArrayList<Hit>()
         var offset = 0
