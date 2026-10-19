@@ -329,6 +329,7 @@ private fun ReaderSurface(
                 filePath = state.book?.filePath.orEmpty(),
                 page = state.pageIndex,
                 pageCount = state.pageCount,
+                dark = dark,
                 onPageChanged = { page -> vm.onPageRendered(page, 0) }
             )
         } else {
