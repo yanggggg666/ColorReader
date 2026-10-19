@@ -1,6 +1,6 @@
 # 潮阅 (OceanReader)
 
-> 当前版本 **v1.1.0**（versionCode 2）· Debug 签名，同签名可直接覆盖安装
+> 当前版本 **v1.1.1**（versionCode 3）· Debug 签名，同签名可直接覆盖安装
 
 一款参考 ColorOS 17 设计语言的 Android 阅读应用，支持多格式文档导入、系统 TTS 朗读跟读、笔记高亮等完整阅读功能。
 
