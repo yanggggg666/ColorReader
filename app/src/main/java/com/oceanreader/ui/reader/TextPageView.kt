@@ -187,10 +187,10 @@ fun TextPageView(
 }
 
 /**
- * Renders a PDF page full-bleed: the bitmap is produced at exactly the
- * viewport size (so no letterbox bars), keeps the page's aspect ratio and is
- * inverted for dark reading palettes. Produced off the main thread by
- * [com.oceanreader.parse.pdf.PdfPageRenderer].
+ * Renders a PDF page full-bleed (cover): the page keeps its aspect ratio and
+ * fills the screen edge to edge, the overflow is cropped — no letterbox bars,
+ * no distortion. The bitmap is produced off the main thread by
+ * [com.oceanreader.parse.pdf.PdfPageRenderer]; dark palettes invert it.
  */
 @Composable
 fun PdfPageView(
@@ -202,6 +202,9 @@ fun PdfPageView(
 ) {
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    // Centre offset of the (possibly larger than screen) bitmap.
+    var originX by remember { mutableFloatStateOf(0f) }
+    var originY by remember { mutableFloatStateOf(0f) }
     val renderer = remember(filePath) {
         com.oceanreader.parse.pdf.PdfPageRenderer(java.io.File(filePath))
     }
@@ -229,11 +232,27 @@ fun PdfPageView(
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val density = LocalDensity.current
-            val widthPx = with(density) { maxWidth.toPx().toInt() }
-            val heightPx = with(density) { maxHeight.toPx().toInt() }
+            val screenW = with(density) { maxWidth.toPx() }
+            val screenH = with(density) { maxHeight.toPx() }
 
-            LaunchedEffect(page, filePath, widthPx, heightPx, dark) {
-                bitmap = renderer.render(page, widthPx.coerceAtLeast(1), heightPx.coerceAtLeast(1))?.let {
+            LaunchedEffect(page, filePath, screenW, screenH, dark) {
+                if (screenW < 1f || screenH < 1f) return@LaunchedEffect
+                val aspect = renderer.pageAspect(page).takeIf { it > 0.01f } ?: 0.707f
+                // Pick the dimension the page must fill; the other follows the
+                // page's own ratio so nothing is distorted.
+                val screenAspect = screenW / screenH
+                val bitmapW: Int
+                val bitmapH: Int
+                if (aspect >= screenAspect) {
+                    bitmapH = screenH.toInt().coerceAtLeast(1)
+                    bitmapW = (screenH * aspect).toInt().coerceAtLeast(1)
+                } else {
+                    bitmapW = screenW.toInt().coerceAtLeast(1)
+                    bitmapH = (screenW / aspect).toInt().coerceAtLeast(1)
+                }
+                originX = (screenW - bitmapW) / 2f
+                originY = (screenH - bitmapH) / 2f
+                bitmap = renderer.render(page, bitmapW, bitmapH)?.let {
                     if (dark) com.oceanreader.parse.pdf.PdfTone.invert(it) else it
                 }
             }
@@ -244,8 +263,7 @@ fun PdfPageView(
             drawIntoCanvas { canvas ->
                 val native: Canvas = canvas.nativeCanvas
                 native.save()
-                // The bitmap already matches the viewport: paint it 1:1.
-                native.translate(0f, dragOffset)
+                native.translate(originX, originY + dragOffset)
                 native.drawBitmap(bmp, 0f, 0f, null)
                 native.restore()
             }
