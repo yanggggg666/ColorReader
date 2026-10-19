@@ -17,12 +17,41 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.oceanreader.ui.theme.LocalAccent
 import com.oceanreader.ui.theme.LocalGlass
 import com.oceanreader.ui.theme.SuperCard
 import com.oceanreader.ui.theme.contentColor
 import com.oceanreader.ui.theme.glassPanel
+
+/* ---------------------------------------------------------------------------
+ *  Layout tokens — every screen lays out on the same 4dp grid and the same
+ *  control sizes, so a button is the same size wherever it appears.
+ * ------------------------------------------------------------------------- */
+
+/** Spacing scale (4/8/12/16/20/24dp). */
+object AppSpacing {
+    val xs: Dp = 4.dp
+    val sm: Dp = 8.dp
+    val md: Dp = 12.dp
+    val lg: Dp = 16.dp
+    val xl: Dp = 20.dp
+    val xxl: Dp = 24.dp
+    val screen: Dp = 20.dp
+}
+
+/** Control sizes: 40dp visual targets inside 48dp touch areas. */
+object AppSize {
+    val iconButton: Dp = 40.dp
+    val touchTarget: Dp = 48.dp
+    val fab: Dp = 56.dp
+    val listRow: Dp = 56.dp
+    val chip: Dp = 32.dp
+    val coverRatio: Float = 0.70f
+    /** Bottom-sheet corner radius, matching Material's large shape. */
+    val sheetCorner: Dp = 28.dp
+}
 
 /** Top app bar with a frosted backdrop. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,6 +100,155 @@ fun AuroraTopBar(
                 }
             }
             actions()
+        }
+    }
+}
+
+/** Frosted bottom bar used by the reader and the shelf selection mode. */
+@Composable
+fun GlassBottomBar(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val glass = LocalGlass.current
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = glass.bottomBarTint.copy(alpha = 0.92f),
+        tonalElevation = 2.dp
+    ) {
+        Column(modifier = Modifier.navigationBarsPadding()) {
+            content()
+        }
+    }
+}
+
+/**
+ * Standard settings/menu row: leading icon, title, optional subtitle and a
+ * trailing control. Every list on every screen is built from this.
+ */
+@Composable
+fun ListRow(
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: (() -> Unit)? = null
+) {
+    val base = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(base)
+            .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.md),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (leading != null) {
+            leading()
+            Spacer(Modifier.width(AppSpacing.lg))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(AppSpacing.md))
+            trailing()
+        }
+    }
+}
+
+/** Standard header inside a bottom sheet (drag handle + title + subtitle). */
+@Composable
+fun SheetHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .padding(vertical = AppSpacing.sm)
+                .size(width = 32.dp, height = 4.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.outlineVariant)
+        )
+        Text(
+            title,
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(horizontal = AppSpacing.xxl)
+        )
+        if (subtitle != null) {
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = AppSpacing.xxl)
+            )
+        }
+    }
+}
+
+/** Filter chip used for sorting / view switching on the shelf. */
+@Composable
+fun AppFilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        modifier = modifier,
+        label = { Text(label) },
+        leadingIcon = if (selected) {
+            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+        } else null
+    )
+}
+
+/** Large hero number with a label, used by the stats screen. */
+@Composable
+fun StatTile(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = SuperCard,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 1.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = AppSpacing.lg, horizontal = AppSpacing.md),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                value,
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+            Spacer(Modifier.height(AppSpacing.xs))
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -196,7 +374,10 @@ fun ColorChipRow(
     }
 }
 
-/** A labelled setting row with an optional trailing control. */
+/**
+ * A labelled setting row with an optional trailing control.
+ * Thin alias over [ListRow] so settings pages and menus look identical.
+ */
 @Composable
 fun SettingRow(
     title: String,
@@ -204,22 +385,5 @@ fun SettingRow(
     subtitle: String? = null,
     trailing: @Composable (() -> Unit)? = null
 ) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            if (subtitle != null) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        trailing?.invoke()
-    }
+    ListRow(title = title, modifier = modifier, subtitle = subtitle, trailing = trailing)
 }

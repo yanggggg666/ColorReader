@@ -50,24 +50,43 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
 
     private val search = MutableStateFlow("")
     private val selection = MutableStateFlow<Set<String>>(emptySet())
+    private val sort = MutableStateFlow(com.oceanreader.data.model.ShelfSort.RECENT)
 
     init {
+        viewModelScope.launch {
+            settings.prefs.collect { p -> sort.value = p.shelfSort }
+        }
         viewModelScope.launch {
             combine(
                 repo.books(),
                 repo.continueReading(),
                 search,
-                selection
-            ) { books, continueBook, query, sel ->
+                selection,
+                sort
+            ) { books, continueBook, query, sel, shelfSort ->
                 val filtered = if (query.isBlank()) books else books.filter {
                     it.title.contains(query, true) || it.author.contains(query, true)
                 }
+                // The DAO returns "recently read first"; other orderings are
+                // applied in memory, which is cheap for a shelf-sized list.
+                val ordered = when (shelfSort) {
+                    com.oceanreader.data.model.ShelfSort.RECENT -> filtered
+                    com.oceanreader.data.model.ShelfSort.ADDED ->
+                        filtered.sortedByDescending { it.addedAt }
+                    com.oceanreader.data.model.ShelfSort.TITLE ->
+                        filtered.sortedBy { it.title }
+                    com.oceanreader.data.model.ShelfSort.AUTHOR ->
+                        filtered.sortedBy { it.author }
+                    com.oceanreader.data.model.ShelfSort.PROGRESS ->
+                        filtered.sortedByDescending { it.percent }
+                }
                 _ui.value.copy(
                     loading = false,
-                    books = filtered,
+                    books = ordered,
                     continueReading = continueBook,
                     searchQuery = query,
-                    selection = sel
+                    selection = sel,
+                    sortMode = shelfSort.ordinal
                 )
             }.collect { _ui.value = it }
         }
@@ -83,6 +102,11 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setSearch(q: String) { search.value = q }
+
+    /** Changes shelf ordering; persisted so it survives restarts. */
+    fun setSort(shelfSort: com.oceanreader.data.model.ShelfSort) {
+        viewModelScope.launch { settings.setShelfSort(shelfSort) }
+    }
 
     fun toggleSelection(id: String) {
         val current = selection.value.toMutableSet()

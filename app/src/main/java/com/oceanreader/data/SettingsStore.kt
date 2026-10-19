@@ -58,6 +58,8 @@ class SettingsStore(private val context: Context) {
     private object Keys {
         val FONT = stringPreferencesKey("font_family")
         val FONT_SIZE = intPreferencesKey("font_size")
+        val BOLD = booleanPreferencesKey("bold_text")
+        val JUSTIFY = booleanPreferencesKey("justify_text")
         val LINE_SPACING = intPreferencesKey("line_spacing")
         val PARA_SPACING = intPreferencesKey("para_spacing")
         val MARGIN_H = intPreferencesKey("margin_h")
@@ -97,8 +99,8 @@ class SettingsStore(private val context: Context) {
             verticalPadding = p[Keys.MARGIN_V] ?: 20,
             paragraphSpacing = p[Keys.PARA_SPACING] ?: 10,
             fontFamily = FontFamilyOption.from(p[Keys.FONT]),
-            boldText = false,
-            justifyText = false,
+            boldText = p[Keys.BOLD] ?: false,
+            justifyText = p[Keys.JUSTIFY] ?: false,
             firstLineIndent = p[Keys.INDENT] ?: 2,
             pageTurn = runCatching { PageTurnMode.valueOf(p[Keys.TURN_MODE] ?: "SLIDE") }
                 .getOrDefault(PageTurnMode.SLIDE),
@@ -127,6 +129,8 @@ class SettingsStore(private val context: Context) {
     suspend fun setPagePalette(v: String) = put(Keys.PAGE_PALETTE, v)
     suspend fun setDarkPagePalette(v: String) = put(Keys.DARK_PAGE_PALETTE, v)
     suspend fun setFontSize(v: Int) = put(Keys.FONT_SIZE, v.coerceIn(12, 32))
+    suspend fun setBoldText(v: Boolean) = put(Keys.BOLD, v)
+    suspend fun setJustifyText(v: Boolean) = put(Keys.JUSTIFY, v)
     suspend fun setLineSpacing(v: Int) = put(Keys.LINE_SPACING, v.coerceIn(100, 300))
     suspend fun setParaSpacing(v: Int) = put(Keys.PARA_SPACING, v.coerceIn(0, 40))
     suspend fun setMarginH(v: Int) = put(Keys.MARGIN_H, v.coerceIn(0, 80))

@@ -77,11 +77,35 @@
 - **极光渐变**：强调色使用蓝紫/青蓝/橙粉等渐变
 - **圆角系统**：统一使用大圆角（16dp~28dp）
 
+### UI 架构规范（`ui/components/SharedComponents.kt`）
+所有页面共用同一套布局令牌与控件，按钮的位置、大小、调用方式完全一致：
+
+| 令牌 | 值 | 用途 |
+|------|----|----|
+| `AppSpacing.xs/sm/md/lg/xl/xxl` | 4/8/12/16/20/24dp | 页面间距（4dp 网格） |
+| `AppSpacing.screen` | 20dp | 屏幕左右安全边距 |
+| `AppSize.iconButton` | 40dp | 图标按钮视觉尺寸（触摸区 48dp） |
+| `AppSize.touchTarget` | 48dp | 最小触摸目标 |
+| `AppSize.fab` | 56dp | 悬浮操作按钮 |
+
+共享组件：`AuroraTopBar`（毛玻璃顶栏，支持副标题）、`ListRow` / `SettingRow`（图标+标题+副标题+尾部控件的标准行）、`SectionHeader`（分区标题）、`SheetHeader`（底部面板标题+拖拽条）、`AppFilterChip`、`StatTile`、`EmptyState`、`AuroraIconButton`、`GlassBottomBar`。
+
+布局约定：
+- **书架**：大标题区（极光渐变底 + 书名计数 + 统计/设置入口）→ 工具栏（搜索 / 排序下拉 / 网格列表切换）→ 继续阅读卡片 → 书架内容；右下角 FAB 唤出导入选择面板（文件 / 文件夹）
+- **阅读器**：顶栏只放「返回 / 目录 / 更多」（其余功能在更多菜单里）；底栏放进度条 + 上一条 + 朗读 + 下一条 + 目录；点击屏幕左/右 1/4 区域翻页，点击中部唤出/隐藏菜单；长按选中句子后可高亮 / 下划线 / 复制 / 写笔记
+- **设置 / 统计**：`SectionHeader` 分区 + `ListRow` 行 + `SegmentedButton` / `Switch` / `Slider` 尾部控件
+
 ### 架构
 - MVVM + Repository 模式
 - Room 持久化书架 / 标注 / 统计
 - DataStore 存储阅读偏好
 - 手写 PDF 解析器（避免重型第三方依赖）
+
+### 导入流程
+- 单文件 / 多选（`OpenMultipleDocuments`）/ 整个文件夹（`OpenDocumentTree` 递归扫描，上限 500 个）
+- 也支持从其它应用「分享到潮阅」或「打开方式」（SEND / SEND_MULTIPLE / VIEW）
+- 批量导入为顺序执行（单个文档解析需常驻内存，并发有 OOM 风险），实时显示进度（第 n/N 个 + 文件名），失败不影响其余文件，结束后 Snackbar 汇报成功/失败数量
+- 文件复制进应用私有目录（`files/books`），不依赖原文件持续存在
 
 ## 已知限制
 - PDF 扫描版无文本层时无法朗读（需 OCR）

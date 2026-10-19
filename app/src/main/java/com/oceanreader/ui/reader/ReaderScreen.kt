@@ -10,11 +10,14 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -23,7 +26,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -40,8 +45,12 @@ import com.oceanreader.reader.ReaderPanel
 import com.oceanreader.reader.ReaderUiState
 import com.oceanreader.reader.ReaderViewModel
 import com.oceanreader.reader.TextPaginator
-import com.oceanreader.ui.theme.LocalGlass
+import com.oceanreader.ui.components.AppSpacing
 import com.oceanreader.ui.components.AuroraIconButton
+import com.oceanreader.ui.components.SheetHeader
+import com.oceanreader.ui.theme.LocalGlass
+import com.oceanreader.ui.theme.PagePalettesDark
+import com.oceanreader.ui.theme.PagePalettesLight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,11 +112,15 @@ fun ReaderScreen(
                 chapterTitle = state.chapterTitle,
                 onBack = onBack,
                 onToc = { vm.setPanel(ReaderPanel.TOC) },
-                onSearch = { vm.setPanel(ReaderPanel.SEARCH) },
-                onAppearance = { vm.setPanel(ReaderPanel.APPEARANCE) },
-                onSpeech = { vm.setPanel(ReaderPanel.SPEECH) },
-                onBookmarks = { vm.setPanel(ReaderPanel.BOOKMARK) },
-                onNotes = { vm.setPanel(ReaderPanel.NOTES) }
+                onMore = { action ->
+                    when (action) {
+                        ReaderMenuAction.SEARCH -> vm.setPanel(ReaderPanel.SEARCH)
+                        ReaderMenuAction.SPEECH -> vm.setPanel(ReaderPanel.SPEECH)
+                        ReaderMenuAction.BOOKMARKS -> vm.setPanel(ReaderPanel.BOOKMARK)
+                        ReaderMenuAction.NOTES -> vm.setPanel(ReaderPanel.NOTES)
+                        ReaderMenuAction.APPEARANCE -> vm.setPanel(ReaderPanel.APPEARANCE)
+                    }
+                }
             )
         }
 
@@ -133,7 +146,7 @@ fun ReaderScreen(
                 onSpeechToggle = {
                     if (speechState.playing) vm.stopSpeaking() else vm.startSpeaking()
                 },
-                onSpeechPanel = { vm.setPanel(ReaderPanel.SPEECH) }
+                onSpeechPanel = { vm.setPanel(ReaderPanel.TOC) }
             )
         }
 
@@ -181,6 +194,14 @@ private fun ReaderSurface(
     val density = LocalDensity.current
     val scheme = MaterialTheme.colorScheme
 
+    // The reading surface uses the user's page palette (纸白/羊皮/护眼/…),
+    // falling back to the theme colours when nothing matches.
+    val dark = scheme.background.luminance() < 0.5f
+    val palette = remember(prefs.pagePalette, prefs.darkPagePalette, dark) {
+        val id = if (dark) prefs.darkPagePalette else prefs.pagePalette
+        (if (dark) PagePalettesDark else PagePalettesLight).firstOrNull { it.id == id }
+    }
+
     val typeface = when (prefs.fontFamily) {
         FontFamilyOption.SANS -> Typeface.SANS_SERIF
         FontFamilyOption.SERIF -> Typeface.SERIF
@@ -197,9 +218,9 @@ private fun ReaderSurface(
             indentPx = with(density) { (prefs.fontSize * prefs.firstLineIndent).sp.toPx() },
             bold = prefs.boldText,
             justify = prefs.justifyText,
-            backgroundColor = scheme.background.toArgb(),
-            textColor = scheme.onBackground.toArgb(),
-            sentenceColor = 0xFFFFB74D.toInt(),
+            backgroundColor = palette?.background?.toArgb() ?: scheme.background.toArgb(),
+            textColor = palette?.text?.toArgb() ?: scheme.onBackground.toArgb(),
+            sentenceColor = palette?.secondary?.toArgb() ?: 0xFFFFB74D.toInt(),
             wordColor = 0xFFFF9800.toInt(),
             typeface = typeface
         )
@@ -238,8 +259,19 @@ private fun ReaderSurface(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(scheme.background)
-            .clickable(onClick = onTap)
+            .background(androidx.compose.ui.graphics.Color(style.backgroundColor))
+            .pointerInput(Unit) {
+                // Mainstream tap zones: left/right quarter turns the page,
+                // the middle band toggles the immersive chrome.
+                detectTapGestures { offset ->
+                    val w = size.width.toFloat().coerceAtLeast(1f)
+                    when {
+                        offset.x < w * 0.25f -> vm.previousPage()
+                        offset.x > w * 0.75f -> vm.nextPage()
+                        else -> onTap()
+                    }
+                }
+            }
     ) {
         val widthPx = with(density) { maxWidth.toPx() }
         val heightPx = with(density) { maxHeight.toPx() }
@@ -323,58 +355,89 @@ private fun indented(text: String, indentPx: Float): CharSequence {
 
 // ------------------------------------------------------------------- chrome
 
+/** Items of the reader's overflow menu (secondary actions live here). */
+enum class ReaderMenuAction { SEARCH, SPEECH, BOOKMARKS, NOTES, APPEARANCE }
+
 @Composable
 private fun ReaderTopBar(
     title: String,
     chapterTitle: String,
     onBack: () -> Unit,
     onToc: () -> Unit,
-    onSearch: () -> Unit,
-    onAppearance: () -> Unit,
-    onSpeech: () -> Unit,
-    onBookmarks: () -> Unit,
-    onNotes: () -> Unit
+    onMore: (ReaderMenuAction) -> Unit
 ) {
     val glass = LocalGlass.current
+    var menuOpen by remember { mutableStateOf(false) }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = glass.topBarTint.copy(alpha = 0.92f),
         tonalElevation = 2.dp
     ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, "返回")
-                }
-                Column(modifier = Modifier.weight(1f)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, "返回")
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (chapterTitle.isNotBlank()) {
                     Text(
-                        title,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        chapterTitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (chapterTitle.isNotBlank()) {
-                        Text(
-                            chapterTitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
                 }
-                AuroraIconButton(Icons.Default.List, "目录", onToc)
-                AuroraIconButton(Icons.Default.Search, "搜索", onSearch)
-                AuroraIconButton(Icons.Default.TextFields, "排版", onAppearance)
-                AuroraIconButton(Icons.Default.VolumeUp, "朗读", onSpeech)
-                AuroraIconButton(Icons.Default.Bookmark, "书签", onBookmarks)
-                AuroraIconButton(Icons.Default.Note, "笔记", onNotes)
+            }
+            AuroraIconButton(Icons.Default.List, "目录", onToc)
+            // Everything that is not "table of contents" lives in the overflow
+            // menu, keeping the bar to the two actions readers use constantly.
+            Box {
+                AuroraIconButton(
+                    icon = Icons.Default.MoreVert,
+                    contentDescription = "更多",
+                    onClick = { menuOpen = true }
+                )
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("搜索") },
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        onClick = { menuOpen = false; onMore(ReaderMenuAction.SEARCH) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("朗读") },
+                        leadingIcon = { Icon(Icons.Default.VolumeUp, null) },
+                        onClick = { menuOpen = false; onMore(ReaderMenuAction.SPEECH) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("书签") },
+                        leadingIcon = { Icon(Icons.Default.Bookmark, null) },
+                        onClick = { menuOpen = false; onMore(ReaderMenuAction.BOOKMARKS) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("笔记") },
+                        leadingIcon = { Icon(Icons.Default.Note, null) },
+                        onClick = { menuOpen = false; onMore(ReaderMenuAction.NOTES) }
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("排版") },
+                        leadingIcon = { Icon(Icons.Default.TextFields, null) },
+                        onClick = { menuOpen = false; onMore(ReaderMenuAction.APPEARANCE) }
+                    )
+                }
             }
         }
     }
@@ -554,110 +617,305 @@ private fun TocPanel(state: ReaderUiState, vm: ReaderViewModel) {
 @Composable
 private fun AppearancePanel(vm: ReaderViewModel) {
     val prefs by vm.prefs.collectAsState()
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("排版设置", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(16.dp))
-        // Font size
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("字号", modifier = Modifier.weight(1f))
-            Slider(
-                value = prefs.fontSize.toFloat(),
-                onValueChange = { size -> vm.setFont { store -> store.setFontSize(size.toInt()) } },
-                valueRange = 12f..32f,
-                steps = 19,
-                modifier = Modifier.weight(2f)
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val palettes = if (dark) PagePalettesDark else PagePalettesLight
+    val paletteId = if (dark) prefs.darkPagePalette else prefs.pagePalette
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 24.dp)
+    ) {
+        SheetHeader(title = "排版", subtitle = "字号、行距、边距与页面底色即时生效")
+
+        // Font family
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("字体", modifier = Modifier.weight(1f))
+            Text(
+                prefs.fontFamily.label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        // Line spacing
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("行距", modifier = Modifier.weight(1f))
-            Slider(
-                value = prefs.lineSpacing,
-                onValueChange = { v -> vm.setFont { store -> store.setLineSpacing((v * 100).toInt()) } },
-                valueRange = 1.0f..2.5f,
-                modifier = Modifier.weight(2f)
+        AppRowControls(
+            options = FontFamilyOption.entries.map { it.label },
+            selectedIndex = FontFamilyOption.entries.indexOf(prefs.fontFamily),
+            onSelect = { index ->
+                vm.setFont { store -> store.setFontFamily(FontFamilyOption.entries[index]) }
+            }
+        )
+
+        SliderRow(
+            label = "字号",
+            valueLabel = "${prefs.fontSize}sp",
+            value = prefs.fontSize.toFloat(),
+            range = 12f..32f,
+            steps = 19,
+            onChange = { v -> vm.setFont { store -> store.setFontSize(v.toInt()) } }
+        )
+        SliderRow(
+            label = "行距",
+            valueLabel = "${prefs.lineSpacing}%",
+            value = prefs.lineSpacing,
+            range = 100f..300f,
+            steps = 19,
+            onChange = { v -> vm.setFont { store -> store.setLineSpacing(v.toInt()) } }
+        )
+        SliderRow(
+            label = "页边距",
+            valueLabel = "${prefs.horizontalPadding}dp",
+            value = prefs.horizontalPadding.toFloat(),
+            range = 8f..64f,
+            onChange = { v -> vm.setFont { store -> store.setMarginH(v.toInt()) } }
+        )
+
+        // First-line indent
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("首行缩进", modifier = Modifier.weight(1f))
+            Text(
+                "${prefs.firstLineIndent} 字符",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        // Margins
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("边距", modifier = Modifier.weight(1f))
-            Slider(
-                value = prefs.horizontalPadding.toFloat(),
-                onValueChange = { v -> vm.setFont { store -> store.setMarginH(v.toInt()) } },
-                valueRange = 8f..56f,
-                modifier = Modifier.weight(2f)
+        AppRowControls(
+            options = listOf("0", "1", "2", "3", "4"),
+            selectedIndex = prefs.firstLineIndent.coerceIn(0, 4),
+            onSelect = { index -> vm.setFont { store -> store.setIndent(index) } }
+        )
+
+        // Bold / justify
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("加粗", modifier = Modifier.weight(1f))
+            Switch(
+                checked = prefs.boldText,
+                onCheckedChange = { v -> vm.setFont { store -> store.setBoldText(v) } }
             )
         }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("两端对齐", modifier = Modifier.weight(1f))
+            Switch(
+                checked = prefs.justifyText,
+                onCheckedChange = { v -> vm.setFont { store -> store.setJustifyText(v) } }
+            )
+        }
+
+        // Page palette
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("页面底色", modifier = Modifier.weight(1f))
+            Text(
+                palettes.firstOrNull { it.id == paletteId }?.name ?: "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.screen),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
+        ) {
+            palettes.forEach { palette ->
+                val selected = palette.id == paletteId
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(palette.background)
+                        .border(
+                            width = if (selected) 2.dp else 1.dp,
+                            color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.outlineVariant,
+                            shape = CircleShape
+                        )
+                        .clickable {
+                            vm.setFont { store ->
+                                if (dark) store.setDarkPagePalette(palette.id) else store.setPagePalette(palette.id)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (selected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = palette.text,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Segmented control used across the appearance panel. */
+@Composable
+private fun AppRowControls(
+    options: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (options.isEmpty()) return
+    SingleChoiceSegmentedButtonRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = AppSpacing.screen)
+    ) {
+        options.forEachIndexed { index, label ->
+            SegmentedButton(
+                selected = index == selectedIndex,
+                onClick = { onSelect(index) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
+            ) {
+                Text(label, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** Label + value + slider row for the appearance panel. */
+@Composable
+private fun SliderRow(
+    label: String,
+    valueLabel: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit,
+    steps: Int = 0
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.xs)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, modifier = Modifier.weight(1f))
+            Text(
+                valueLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Slider(
+            value = value.coerceIn(range.start, range.endInclusive),
+            onValueChange = onChange,
+            valueRange = range,
+            steps = steps
+        )
     }
 }
 
 @Composable
 private fun SpeechPanel(vm: ReaderViewModel) {
     val speechState by vm.speech.state.collectAsState()
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("朗读设置", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(16.dp))
+    Column(modifier = Modifier.fillMaxWidth()) {
+        SheetHeader(title = "朗读", subtitle = "借助系统 TTS 引擎跟读")
 
-        // Speed
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("语速", modifier = Modifier.weight(1f))
-            Slider(
-                value = speechState.speed,
-                onValueChange = { vm.speech.setSpeed(it) },
-                valueRange = 0.3f..3f,
-                modifier = Modifier.weight(2f)
-            )
-        }
-
-        // Pitch
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("音调", modifier = Modifier.weight(1f))
-            Slider(
-                value = speechState.pitch,
-                onValueChange = { vm.speech.setPitch(it) },
-                valueRange = 0.5f..2f,
-                modifier = Modifier.weight(2f)
-            )
-        }
+        SliderRow(
+            label = "语速",
+            valueLabel = String.format("%.1fx", speechState.speed),
+            value = speechState.speed,
+            range = 0.3f..3f,
+            onChange = { vm.speech.setSpeed(it) }
+        )
+        SliderRow(
+            label = "音调",
+            valueLabel = String.format("%.1fx", speechState.pitch),
+            value = speechState.pitch,
+            range = 0.5f..2f,
+            onChange = { vm.speech.setPitch(it) }
+        )
 
         // Sleep timer
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text("定时停止", modifier = Modifier.weight(1f))
             TextButton(onClick = { vm.speech.setSleepTimer(15) }) { Text("15分钟") }
+            Spacer(Modifier.width(AppSpacing.xs))
             TextButton(onClick = { vm.speech.setSleepTimer(30) }) { Text("30分钟") }
+            Spacer(Modifier.width(AppSpacing.xs))
             TextButton(onClick = { vm.speech.setSleepTimer(0) }) { Text("关闭") }
         }
+        Spacer(Modifier.height(AppSpacing.lg))
     }
 }
 
 @Composable
 private fun SearchPanel(state: ReaderUiState, vm: ReaderViewModel) {
-    Column(modifier = Modifier.padding(16.dp)) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        SheetHeader(title = "搜索", subtitle = "在本书全文中查找")
         OutlinedTextField(
             value = state.searchQuery,
             onValueChange = { vm.search(it) },
-            placeholder = { Text("搜索正文") },
-            modifier = Modifier.fillMaxWidth()
+            placeholder = { Text("输入关键词") },
+            leadingIcon = { Icon(Icons.Default.Search, null) },
+            singleLine = true,
+            shape = RoundedCornerShape(28.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.screen)
         )
-        Spacer(Modifier.height(8.dp))
-        Text("${state.searchHits.size} 个结果", style = MaterialTheme.typography.bodySmall)
+        Text(
+            "${state.searchHits.size} 个结果",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = AppSpacing.screen, vertical = AppSpacing.sm)
+        )
         LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
             itemsIndexed(state.searchHits) { index, hit ->
                 ListItem(
-                    headlineContent = { Text("第 ${hit.first + 1} 章") },
-                    supportingContent = { Text(state.chapters.getOrNull(hit.first)?.title.orEmpty()) },
+                    headlineContent = { Text(state.chapters.getOrNull(hit.first)?.title.orEmpty()) },
+                    supportingContent = { Text("第 ${hit.first + 1} 章") },
                     modifier = Modifier.clickable { vm.jumpToSearchHit(index) }
                 )
             }
         }
+        Spacer(Modifier.height(AppSpacing.lg))
     }
 }
 
 @Composable
 private fun BookmarkPanel(state: ReaderUiState, vm: ReaderViewModel) {
-    Column(modifier = Modifier.padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("书签", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+    Column(modifier = Modifier.fillMaxWidth()) {
+        SheetHeader(title = "书签", subtitle = "在章节或页面位置插入书签")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("当前位置", modifier = Modifier.weight(1f))
             TextButton(onClick = { vm.toggleBookmark() }) {
                 Text(if (vm.isBookmarked()) "删除书签" else "添加书签")
             }
@@ -678,31 +936,80 @@ private fun BookmarkPanel(state: ReaderUiState, vm: ReaderViewModel) {
                 )
             }
         }
+        Spacer(Modifier.height(AppSpacing.lg))
     }
 }
 
 @Composable
 private fun NotesPanel(state: ReaderUiState, vm: ReaderViewModel) {
-    val notes by com.oceanreader.AppContainer.from(LocalContext.current)
-        .repository.notes(state.book?.id.orEmpty()).collectAsState(initial = emptyList())
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("笔记", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
+    val context = LocalContext.current
+    val repo = remember(context) { com.oceanreader.AppContainer.from(context).repository }
+    val notes by repo.notes(state.book?.id.orEmpty()).collectAsState(initial = emptyList())
+    val scope = rememberCoroutineScope()
+    var draft by remember { mutableStateOf("") }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        SheetHeader(title = "笔记", subtitle = "选中正文后即可写下想法")
+
         if (state.selection.isNotBlank()) {
-            OutlinedTextField(
-                value = "",
-                onValueChange = { },
-                placeholder = { Text("为选中文字添加笔记") },
-                modifier = Modifier.fillMaxWidth()
+            Text(
+                text = state.selection.take(80),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = AppSpacing.screen)
             )
-        }
-        LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
-            items(notes) { note ->
-                ListItem(
-                    headlineContent = { Text(note.content) },
-                    supportingContent = { Text(note.quote) }
-                )
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                placeholder = { Text("写下你的想法") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.sm)
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = AppSpacing.screen),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = { draft = ""; vm.clearSelection() }) { Text("取消") }
+                Spacer(Modifier.width(AppSpacing.sm))
+                Button(
+                    enabled = draft.isNotBlank() && state.book != null,
+                    onClick = {
+                        val book = state.book ?: return@Button
+                        val noteBook = book
+                        val content = draft.trim()
+                        val quote = state.selection
+                        val chapter = state.chapterIndex
+                        val offset = state.selectionStart
+                        scope.launch {
+                            repo.addNote(noteBook, chapter, offset, content, quote)
+                        }
+                        draft = ""
+                        vm.clearSelection()
+                    }
+                ) { Text("保存") }
             }
         }
+
+        if (notes.isNotEmpty()) {
+            LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                items(notes) { note ->
+                    ListItem(
+                        headlineContent = { Text(note.content) },
+                        supportingContent = { Text(note.quote) }
+                    )
+                }
+            }
+        } else if (state.selection.isBlank()) {
+            Text(
+                "还没有笔记。在正文中长按选中句子，再点「笔记」即可创建。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = AppSpacing.screen)
+            )
+        }
+        Spacer(Modifier.height(AppSpacing.lg))
     }
 }

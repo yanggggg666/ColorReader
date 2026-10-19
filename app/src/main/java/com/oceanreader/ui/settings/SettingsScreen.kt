@@ -5,7 +5,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.rememberCoroutineScope
@@ -19,10 +18,13 @@ import com.oceanreader.data.model.DarkMode
 import com.oceanreader.data.model.FontFamilyOption
 import com.oceanreader.data.model.PageTurnMode
 import com.oceanreader.data.model.ShelfSort
+import com.oceanreader.ui.components.AppSize
+import com.oceanreader.ui.components.AppSpacing
 import com.oceanreader.ui.components.AuroraTopBar
 import com.oceanreader.ui.components.SectionHeader
 import com.oceanreader.ui.components.SettingRow
 import com.oceanreader.ui.theme.AccentGradients
+import com.oceanreader.ui.theme.PagePalette
 import com.oceanreader.ui.theme.PagePalettesDark
 import com.oceanreader.ui.theme.PagePalettesLight
 
@@ -49,6 +51,8 @@ fun SettingsScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
         ) {
+            /* ------------------------------ 外观 ------------------------------ */
+
             SectionHeader("外观")
 
             SettingRow(
@@ -67,21 +71,10 @@ fun SettingsScreen(
                 title = "强调色",
                 subtitle = AccentGradients.getOrNull(prefs.accentIndex)?.name ?: "默认",
                 trailing = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AccentGradients.forEachIndexed { index, gradient ->
-                            FilledIconButton(
-                                onClick = { write { settings.setAccent(index) } },
-                                modifier = Modifier.size(32.dp),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = gradient.start
-                                )
-                            ) {
-                                if (prefs.accentIndex == index) {
-                                    Icon(Icons.Default.Check, null, tint = Color.White)
-                                }
-                            }
-                        }
-                    }
+                    AccentSwatches(
+                        selectedIndex = prefs.accentIndex,
+                        onSelect = { write { settings.setAccent(it) } }
+                    )
                 }
             )
 
@@ -97,6 +90,8 @@ fun SettingsScreen(
             )
 
             HorizontalDivider()
+
+            /* ------------------------------ 阅读 ------------------------------ */
 
             SectionHeader("阅读")
 
@@ -190,27 +185,19 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            /* ---------------------------- 页面底色 ---------------------------- */
+
             SectionHeader("页面底色")
 
             SettingRow(
                 title = "浅色模式",
                 subtitle = PagePalettesLight.find { it.id == prefs.pagePalette }?.name ?: "纸白",
                 trailing = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PagePalettesLight.forEach { palette ->
-                            FilledIconButton(
-                                onClick = { write { settings.setPagePalette(palette.id) } },
-                                modifier = Modifier.size(32.dp),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = palette.background
-                                )
-                            ) {
-                                if (prefs.pagePalette == palette.id) {
-                                    Icon(Icons.Default.Check, null, tint = palette.text)
-                                }
-                            }
-                        }
-                    }
+                    PaletteSwatches(
+                        palettes = PagePalettesLight,
+                        selectedId = prefs.pagePalette,
+                        onSelect = { write { settings.setPagePalette(it) } }
+                    )
                 }
             )
 
@@ -218,25 +205,17 @@ fun SettingsScreen(
                 title = "深色模式",
                 subtitle = PagePalettesDark.find { it.id == prefs.darkPagePalette }?.name ?: "夜阑",
                 trailing = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PagePalettesDark.forEach { palette ->
-                            FilledIconButton(
-                                onClick = { write { settings.setDarkPagePalette(palette.id) } },
-                                modifier = Modifier.size(32.dp),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = palette.background
-                                )
-                            ) {
-                                if (prefs.darkPagePalette == palette.id) {
-                                    Icon(Icons.Default.Check, null, tint = palette.text)
-                                }
-                            }
-                        }
-                    }
+                    PaletteSwatches(
+                        palettes = PagePalettesDark,
+                        selectedId = prefs.darkPagePalette,
+                        onSelect = { write { settings.setDarkPagePalette(it) } }
+                    )
                 }
             )
 
             HorizontalDivider()
+
+            /* ------------------------------ 朗读 ------------------------------ */
 
             SectionHeader("朗读")
 
@@ -290,6 +269,8 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            /* ------------------------------ 书架 ------------------------------ */
+
             SectionHeader("书架")
 
             SettingRow(
@@ -298,7 +279,7 @@ fun SettingsScreen(
                 trailing = {
                     SegmentedButton(
                         options = ShelfSort.entries.map { it.label },
-                        selectedIndex = prefs.gridColumns,
+                        selectedIndex = prefs.shelfSort.ordinal,
                         onSelect = { write { settings.setShelfSort(ShelfSort.entries[it]) } }
                     )
                 }
@@ -326,7 +307,62 @@ fun SettingsScreen(
                 }
             )
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(AppSpacing.xxl))
+        }
+    }
+}
+
+/** 圆形强调色色板：选中态显示对勾。 */
+@Composable
+private fun AccentSwatches(
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+    ) {
+        AccentGradients.forEachIndexed { index, gradient ->
+            FilledIconButton(
+                onClick = { onSelect(index) },
+                modifier = Modifier.size(AppSize.chip),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = gradient.start
+                )
+            ) {
+                if (selectedIndex == index) {
+                    Icon(Icons.Default.Check, contentDescription = null, tint = Color.White)
+                }
+            }
+        }
+    }
+}
+
+/** 圆形页面底色色板：选中态用当前文字色画对勾。 */
+@Composable
+private fun PaletteSwatches(
+    palettes: List<PagePalette>,
+    selectedId: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+    ) {
+        palettes.forEach { palette ->
+            FilledIconButton(
+                onClick = { onSelect(palette.id) },
+                modifier = Modifier.size(AppSize.chip),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = palette.background
+                )
+            ) {
+                if (selectedId == palette.id) {
+                    Icon(Icons.Default.Check, contentDescription = null, tint = palette.text)
+                }
+            }
         }
     }
 }
@@ -340,9 +376,7 @@ private fun SegmentedButton(
     modifier: Modifier = Modifier
 ) {
     if (options.isEmpty()) return
-    SingleChoiceSegmentedButtonRow(
-        modifier = Modifier.height(36.dp)
-    ) {
+    SingleChoiceSegmentedButtonRow(modifier = modifier.height(36.dp)) {
         options.forEachIndexed { index, label ->
             SegmentedButton(
                 selected = index == selectedIndex,

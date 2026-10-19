@@ -6,9 +6,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -19,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -29,7 +32,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.oceanreader.data.db.BookEntity
+import com.oceanreader.data.model.ShelfSort
+import com.oceanreader.ui.components.AppSpacing
+import com.oceanreader.ui.components.AuroraIconButton
 import com.oceanreader.ui.components.EmptyState
+import com.oceanreader.ui.theme.LocalAccent
+import com.oceanreader.ui.theme.SuperCard
+import com.oceanreader.ui.theme.auroraBrush
 import androidx.compose.foundation.ExperimentalFoundationApi
 import java.io.File
 
@@ -47,6 +56,8 @@ fun ShelfScreen(
     val context = LocalContext.current
     val snackbarHost = remember { SnackbarHostState() }
     var showImportSheet by remember { mutableStateOf(false) }
+    var listMode by rememberSaveable { mutableStateOf(false) }
+    var sortMenuOpen by remember { mutableStateOf(false) }
 
     // The activity publishes picks here. Listeners must unregister, or every
     // shelf composition that ever lived would also react to the next pick.
@@ -70,19 +81,6 @@ fun ShelfScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHost) },
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("我的书架", style = MaterialTheme.typography.headlineSmall) },
-                actions = {
-                    IconButton(onClick = onStats) {
-                        Icon(Icons.Default.BarChart, contentDescription = "阅读统计")
-                    }
-                    IconButton(onClick = onSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置")
-                    }
-                }
-            )
-        },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { showImportSheet = true },
@@ -93,6 +91,65 @@ fun ShelfScreen(
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            // Large-title header with the two secondary destinations.
+            ShelfHeader(
+                bookCount = state.books.size,
+                onStats = onStats,
+                onSettings = onSettings,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            // Search + sort + view mode, one row, always reachable.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.sm),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = state.searchQuery,
+                    onValueChange = vm::setSearch,
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("搜索书名 / 作者") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(28.dp)
+                )
+                Spacer(Modifier.width(AppSpacing.sm))
+                Box {
+                    AuroraIconButton(
+                        icon = Icons.Default.Sort,
+                        contentDescription = "排序方式",
+                        onClick = { sortMenuOpen = true }
+                    )
+                    DropdownMenu(
+                        expanded = sortMenuOpen,
+                        onDismissRequest = { sortMenuOpen = false }
+                    ) {
+                        ShelfSort.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.label) },
+                                trailingIcon = {
+                                    if (option.ordinal == state.sortMode) {
+                                        Icon(Icons.Default.Check, contentDescription = null)
+                                    }
+                                },
+                                onClick = {
+                                    sortMenuOpen = false
+                                    vm.setSort(option)
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.width(AppSpacing.xs))
+                AuroraIconButton(
+                    icon = if (listMode) Icons.Default.GridView else Icons.Default.ViewList,
+                    contentDescription = if (listMode) "切换到网格" else "切换到列表",
+                    onClick = { listMode = !listMode }
+                )
+            }
+
             // Batch import progress
             if (state.importing) {
                 ImportProgressBanner(
@@ -102,18 +159,6 @@ fun ShelfScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
-
-            OutlinedTextField(
-                value = state.searchQuery,
-                onValueChange = vm::setSearch,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                placeholder = { Text("搜索书名 / 作者") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                singleLine = true,
-                shape = RoundedCornerShape(28.dp)
-            )
 
             if (state.continueReading != null) {
                 ContinueReadingCard(
@@ -142,6 +187,29 @@ fun ShelfScreen(
                     hint = if (state.searchQuery.isBlank()) "点击右下角按钮导入第一本书" else "换个关键词试试",
                     modifier = Modifier.weight(1f)
                 )
+            } else if (listMode) {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(
+                        start = AppSpacing.screen,
+                        end = AppSpacing.screen,
+                        bottom = 96.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+                ) {
+                    items(state.books, key = { it.id }) { book ->
+                        BookListRow(
+                            book = book,
+                            selected = book.id in state.selection,
+                            showCover = state.gridCover,
+                            onClick = {
+                                if (state.selection.isNotEmpty()) vm.toggleSelection(book.id)
+                                else onOpenBook(book.id)
+                            },
+                            onLongClick = { vm.toggleSelection(book.id) }
+                        )
+                    }
+                }
             } else {
                 val columns = if (state.gridColumns > 0) state.gridColumns else 3
                 LazyVerticalGrid(
@@ -180,6 +248,127 @@ fun ShelfScreen(
                 },
                 onDismiss = { showImportSheet = false }
             )
+        }
+    }
+}
+
+/**
+ * Shelf hero header: large title, book count and the two secondary
+ * destinations (stats and settings) on the aurora gradient.
+ */
+@Composable
+private fun ShelfHeader(
+    bookCount: Int,
+    onStats: () -> Unit,
+    onSettings: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val accent = LocalAccent.current
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    Box(
+        modifier = modifier
+            .background(auroraBrush(dark, accent))
+            .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.md)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "书架",
+                    style = MaterialTheme.typography.headlineMedium.copy(
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Text(
+                    text = "共 $bookCount 本书",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AuroraIconButton(
+                icon = Icons.Default.BarChart,
+                contentDescription = "阅读统计",
+                onClick = onStats
+            )
+            Spacer(Modifier.width(AppSpacing.sm))
+            AuroraIconButton(
+                icon = Icons.Default.Settings,
+                contentDescription = "设置",
+                onClick = onSettings
+            )
+        }
+    }
+}
+
+/** One book as a wide list row: cover, meta and reading progress. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BookListRow(
+    book: BookEntity,
+    selected: Boolean,
+    showCover: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        shape = SuperCard,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(AppSpacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BookCover(
+                coverPath = book.coverPath,
+                title = book.title,
+                modifier = Modifier.size(width = 58.dp, height = 82.dp)
+            )
+            Spacer(Modifier.width(AppSpacing.md))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = book.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (book.author.isNotBlank()) {
+                    Text(
+                        text = book.author,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.height(AppSpacing.sm))
+                LinearProgressIndicator(
+                    progress = { book.percent },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                )
+                Spacer(Modifier.height(AppSpacing.xs))
+                Text(
+                    text = "${(book.percent * 100).toInt()}% · ${book.chapterCount} 章",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
+            if (selected) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
