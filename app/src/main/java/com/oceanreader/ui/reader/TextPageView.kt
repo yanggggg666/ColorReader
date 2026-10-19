@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -21,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import com.oceanreader.reader.HighlightSpan
 import com.oceanreader.reader.ReaderStyle
 import com.oceanreader.reader.TextPaginator
@@ -185,26 +187,23 @@ fun TextPageView(
 }
 
 /**
- * Renders a PDF page through the platform renderer.
- *
- * The bitmap is produced off the main thread by [com.oceanreader.parse.pdf.PdfPageRenderer]
- * and drawn centred, with the page aspect ratio preserved.
+ * Renders a PDF page full-bleed: the bitmap is produced at exactly the
+ * viewport size (so no letterbox bars), keeps the page's aspect ratio and is
+ * inverted for dark reading palettes. Produced off the main thread by
+ * [com.oceanreader.parse.pdf.PdfPageRenderer].
  */
 @Composable
 fun PdfPageView(
     filePath: String,
     page: Int,
     pageCount: Int,
+    dark: Boolean = false,
     onPageChanged: (Int) -> Unit
 ) {
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     val renderer = remember(filePath) {
         com.oceanreader.parse.pdf.PdfPageRenderer(java.io.File(filePath))
-    }
-
-    LaunchedEffect(page, filePath) {
-        bitmap = renderer.render(page, 1080, 1920)
     }
 
     Box(
@@ -228,17 +227,25 @@ fun PdfPageView(
                 )
             }
     ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val density = LocalDensity.current
+            val widthPx = with(density) { maxWidth.toPx().toInt() }
+            val heightPx = with(density) { maxHeight.toPx().toInt() }
+
+            LaunchedEffect(page, filePath, widthPx, heightPx, dark) {
+                bitmap = renderer.render(page, widthPx.coerceAtLeast(1), heightPx.coerceAtLeast(1))?.let {
+                    if (dark) com.oceanreader.parse.pdf.PdfTone.invert(it) else it
+                }
+            }
+        }
+
         Canvas(modifier = Modifier.fillMaxSize()) {
             val bmp = bitmap ?: return@Canvas
             drawIntoCanvas { canvas ->
                 val native: Canvas = canvas.nativeCanvas
-                val scale = minOf(size.width / bmp.width, size.height / bmp.height)
-                val w = bmp.width * scale
-                val h = bmp.height * scale
-                val dx = (size.width - w) / 2f
-                val dy = (size.height - h) / 2f
                 native.save()
-                native.translate(dx, dy + dragOffset)
+                // The bitmap already matches the viewport: paint it 1:1.
+                native.translate(0f, dragOffset)
                 native.drawBitmap(bmp, 0f, 0f, null)
                 native.restore()
             }
