@@ -62,12 +62,16 @@ object EpubParser {
 
             if (chapters.isEmpty()) throw ParseException("EPUB 没有可读内容")
 
+            // One spine item per chapter can mean a few lines per chapter;
+            // merge those up so pages stay full.
+            val merged = ChapterSplitter.mergeUp(body.toString(), chapters)
+
             return ParsedDoc(
                 title = meta.title.ifBlank { fallbackTitle },
                 author = meta.author,
                 description = meta.description,
                 body = body.toString(),
-                chapters = chapters,
+                chapters = merged,
                 coverBytes = extractCover(zip, manifest, baseDir, opf),
                 language = meta.language,
                 readerKind = ReaderKind.FLOW
