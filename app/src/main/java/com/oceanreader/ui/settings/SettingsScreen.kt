@@ -147,12 +147,12 @@ fun SettingsScreen(
 
             SettingRow(
                 title = "段间距",
-                subtitle = "${prefs.paragraphSpacing}dp",
+                subtitle = "${prefs.paragraphSpacing / 100f}em（相对字号）",
                 trailing = {
                     Slider(
                         value = prefs.paragraphSpacing.toFloat(),
                         onValueChange = { write { settings.setParaSpacing(it.toInt()) } },
-                        valueRange = 0f..40f,
+                        valueRange = 0f..150f,
                         modifier = Modifier.width(120.dp)
                     )
                 }
