@@ -1,9 +1,6 @@
 package com.oceanreader.ui.reader
 
 import android.graphics.Typeface
-import android.text.SpannableStringBuilder
-import android.text.Spanned
-import android.text.style.LeadingMarginSpan
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -44,6 +41,8 @@ import com.oceanreader.data.model.FontFamilyOption
 import kotlinx.coroutines.launch
 import com.oceanreader.reader.HighlightSpan
 import com.oceanreader.reader.ReaderPanel
+import com.oceanreader.reader.ReaderStyle
+import com.oceanreader.reader.ReaderTypesetter
 import com.oceanreader.reader.ReaderUiState
 import com.oceanreader.reader.ReaderViewModel
 import com.oceanreader.reader.TextPaginator
@@ -211,10 +210,17 @@ private fun ReaderSurface(
         FontFamilyOption.MONO -> Typeface.MONOSPACE
     }
 
-    val style = remember(prefs.fontSize, prefs.lineSpacing, prefs.horizontalPadding, prefs.verticalPadding, prefs.firstLineIndent, prefs.boldText, prefs.justifyText, prefs.fontFamily, density, scheme) {
+    val style = remember(
+        prefs.fontSize, prefs.lineSpacing, prefs.horizontalPadding, prefs.verticalPadding,
+        prefs.firstLineIndent, prefs.boldText, prefs.justifyText, prefs.fontFamily,
+        prefs.paragraphSpacing, density, scheme, palette
+    ) {
+        val codeBg = palette?.secondary?.toArgb() ?: scheme.onSurface.toArgb()
         ReaderStyle(
             fontSizePx = with(density) { prefs.fontSize.sp.toPx() },
-            lineSpacing = prefs.lineSpacing,
+            // CJK never goes below ~1.35 line height: tighter spacing clips
+            // character tops and bottoms.
+            lineSpacing = prefs.lineSpacing.coerceAtLeast(1.35f),
             marginHorizontalPx = with(density) { prefs.horizontalPadding.dp.toPx() },
             marginVerticalPx = with(density) { prefs.verticalPadding.dp.toPx() },
             indentPx = with(density) { (prefs.fontSize * prefs.firstLineIndent).sp.toPx() },
@@ -224,7 +230,10 @@ private fun ReaderSurface(
             textColor = palette?.text?.toArgb() ?: scheme.onBackground.toArgb(),
             sentenceColor = palette?.secondary?.toArgb() ?: 0xFFFFB74D.toInt(),
             wordColor = 0xFFFF9800.toInt(),
-            typeface = typeface
+            typeface = typeface,
+            paragraphSpacingPx = with(density) { prefs.paragraphSpacing.dp.toPx() },
+            headingColor = palette?.secondary?.toArgb() ?: scheme.onBackground.toArgb(),
+            codeBackground = (0x22 shl 24) or (codeBg and 0x00FFFFFF)
         )
     }
 
@@ -240,8 +249,10 @@ private fun ReaderSurface(
         }
     }
 
-    val styledText = remember(state.chapterText, style.indentPx) {
-        if (style.indentPx > 0f) indented(state.chapterText, style.indentPx) else state.chapterText
+    // Block-stream typesetting: headings, paragraphs and code blocks get their
+    // own size and spacing without changing a single character offset.
+    val styledText = remember(state.chapterText, state.chapterIndex, style, state.chapterTitle) {
+        ReaderTypesetter.layout(state.chapterText, style, state.chapterTitle)
     }
 
     val paginator = remember { TextPaginator() }
@@ -335,25 +346,6 @@ private fun ReaderSurface(
             )
         }
     }
-}
-
-/** Applies a first-line indent to every paragraph via margin spans. */
-private fun indented(text: String, indentPx: Float): CharSequence {
-    if (text.isEmpty() || indentPx <= 0f) return text
-    val out = SpannableStringBuilder(text)
-    var offset = 0
-    for (line in text.split("\n")) {
-        if (line.isNotBlank()) {
-            out.setSpan(
-                LeadingMarginSpan.Standard(indentPx.toInt(), 0),
-                offset,
-                offset + line.length,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-        offset += line.length + 1
-    }
-    return out
 }
 
 // ------------------------------------------------------------------- chrome
@@ -675,6 +667,13 @@ private fun AppearancePanel(vm: ReaderViewModel) {
             value = prefs.horizontalPadding.toFloat(),
             range = 8f..64f,
             onChange = { v -> vm.setFont { store -> store.setMarginH(v.toInt()) } }
+        )
+        SliderRow(
+            label = "段间距",
+            valueLabel = "${prefs.paragraphSpacing}dp",
+            value = prefs.paragraphSpacing.toFloat(),
+            range = 0f..40f,
+            onChange = { v -> vm.setFont { store -> store.setParaSpacing(v.toInt()) } }
         )
 
         // First-line indent

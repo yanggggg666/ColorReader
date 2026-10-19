@@ -22,29 +22,9 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import com.oceanreader.reader.HighlightSpan
+import com.oceanreader.reader.ReaderStyle
 import com.oceanreader.reader.TextPaginator
 import com.oceanreader.tts.SpeechCursor
-
-/**
- * Resolved visual style for the flowing-text renderer.
- *
- * Everything is already converted to pixels: Compose dp/sp never reaches the
- * [TextPaginator], which works purely on [android.text.TextPaint].
- */
-data class ReaderStyle(
-    val fontSizePx: Float,
-    val lineSpacing: Float,
-    val marginHorizontalPx: Float,
-    val marginVerticalPx: Float,
-    val indentPx: Float,
-    val bold: Boolean,
-    val justify: Boolean,
-    @androidx.annotation.ColorInt val backgroundColor: Int,
-    @androidx.annotation.ColorInt val textColor: Int,
-    @androidx.annotation.ColorInt val sentenceColor: Int,
-    @androidx.annotation.ColorInt val wordColor: Int,
-    val typeface: android.graphics.Typeface? = null
-)
 
 /** Default highlight palette (matches the settings screen chips). */
 val HighlightColors: List<Int> = listOf(
