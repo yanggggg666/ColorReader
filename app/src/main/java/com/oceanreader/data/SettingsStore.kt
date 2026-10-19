@@ -97,7 +97,7 @@ class SettingsStore(private val context: Context) {
             lineSpacing = (p[Keys.LINE_SPACING] ?: 170) / 100f,
             horizontalPadding = p[Keys.MARGIN_H] ?: 22,
             verticalPadding = p[Keys.MARGIN_V] ?: 20,
-            paragraphSpacing = p[Keys.PARA_SPACING] ?: 10,
+            paragraphSpacing = p[Keys.PARA_SPACING] ?: 40,
             fontFamily = FontFamilyOption.from(p[Keys.FONT]),
             boldText = p[Keys.BOLD] ?: false,
             justifyText = p[Keys.JUSTIFY] ?: false,
@@ -132,7 +132,8 @@ class SettingsStore(private val context: Context) {
     suspend fun setBoldText(v: Boolean) = put(Keys.BOLD, v)
     suspend fun setJustifyText(v: Boolean) = put(Keys.JUSTIFY, v)
     suspend fun setLineSpacing(v: Int) = put(Keys.LINE_SPACING, v.coerceIn(100, 300))
-    suspend fun setParaSpacing(v: Int) = put(Keys.PARA_SPACING, v.coerceIn(0, 40))
+    /** Paragraph spacing in 1/100 em, so it tracks the font size (0..1.5em). */
+    suspend fun setParaSpacing(v: Int) = put(Keys.PARA_SPACING, v.coerceIn(0, 150))
     suspend fun setMarginH(v: Int) = put(Keys.MARGIN_H, v.coerceIn(0, 80))
     suspend fun setMarginV(v: Int) = put(Keys.MARGIN_V, v.coerceIn(0, 80))
     suspend fun setIndent(v: Int) = put(Keys.INDENT, v.coerceIn(0, 4))
