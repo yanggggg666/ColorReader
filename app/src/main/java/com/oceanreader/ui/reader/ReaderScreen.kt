@@ -210,6 +210,8 @@ private fun ReaderSurface(
         FontFamilyOption.MONO -> Typeface.MONOSPACE
     }
 
+    val fontSizePx = with(density) { prefs.fontSize.sp.toPx() }
+
     val style = remember(
         prefs.fontSize, prefs.lineSpacing, prefs.horizontalPadding, prefs.verticalPadding,
         prefs.firstLineIndent, prefs.boldText, prefs.justifyText, prefs.fontFamily,
@@ -217,7 +219,7 @@ private fun ReaderSurface(
     ) {
         val codeBg = palette?.secondary?.toArgb() ?: scheme.onSurface.toArgb()
         ReaderStyle(
-            fontSizePx = with(density) { prefs.fontSize.sp.toPx() },
+            fontSizePx = fontSizePx,
             // CJK never goes below ~1.35 line height: tighter spacing clips
             // character tops and bottoms.
             lineSpacing = prefs.lineSpacing.coerceAtLeast(1.35f),
@@ -231,7 +233,10 @@ private fun ReaderSurface(
             sentenceColor = palette?.secondary?.toArgb() ?: 0xFFFFB74D.toInt(),
             wordColor = 0xFFFF9800.toInt(),
             typeface = typeface,
-            paragraphSpacingPx = with(density) { prefs.paragraphSpacing.dp.toPx() },
+            // Paragraph pacing is relative to the font size (em), like WeRead's
+            // TypesetGlue: 40 = 0.4em. A fixed dp value inflates on big fonts
+            // and disappears on small ones.
+            paragraphSpacingPx = fontSizePx * prefs.paragraphSpacing / 100f,
             headingColor = palette?.secondary?.toArgb() ?: scheme.onBackground.toArgb(),
             codeBackground = (0x22 shl 24) or (codeBg and 0x00FFFFFF)
         )
@@ -671,9 +676,9 @@ private fun AppearancePanel(vm: ReaderViewModel) {
         )
         SliderRow(
             label = "段间距",
-            valueLabel = "${prefs.paragraphSpacing}dp",
+            valueLabel = "${prefs.paragraphSpacing / 100f}em",
             value = prefs.paragraphSpacing.toFloat(),
-            range = 0f..40f,
+            range = 0f..150f,
             onChange = { v -> vm.setFont { store -> store.setParaSpacing(v.toInt()) } }
         )
 
