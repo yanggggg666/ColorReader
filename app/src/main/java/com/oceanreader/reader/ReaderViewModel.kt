@@ -250,7 +250,14 @@ class ReaderViewModel(
     fun previousChapter() {
         val s = _ui.value
         if (s.chapterIndex <= 0) return
-        goToChapter(s.chapterIndex - 1, if (s.isPaged) (s.pageCount - 1).coerceAtLeast(0) else 0)
+        if (!s.isPaged) {
+            goToChapter(s.chapterIndex - 1, 0)
+            return
+        }
+        // Land on the last page *of the previous chapter*, not the document's.
+        val lastPageOfPrevious = (s.chapters.getOrNull(s.chapterIndex)?.page
+            ?: s.pageCount) - 1
+        goToChapter(s.chapterIndex - 1, lastPageOfPrevious.coerceAtLeast(0))
     }
 
     fun goToChapter(index: Int, page: Int = 0, offset: Int = 0) {
@@ -264,18 +271,26 @@ class ReaderViewModel(
         } ?: s.chapterText
 
         lastPageOffset = offset.coerceIn(0, text.length)
+        // For page-based documents (PDF) the chapter owns a page range: the
+        // default jump target is the chapter's first page, otherwise page 0.
+        val targetPage = if (s.isPaged) {
+            (if (page > 0) page else ref?.page ?: 0)
+                .coerceIn(0, (s.pageCount - 1).coerceAtLeast(0))
+        } else {
+            0
+        }
         _ui.value = s.copy(
             chapterIndex = clamped,
             chapterTitle = ref?.title.orEmpty(),
             chapterText = text,
-            pageIndex = if (s.isPaged) page.coerceIn(0, (s.pageCount - 1).coerceAtLeast(0)) else 0,
+            pageIndex = targetPage,
             panel = ReaderPanel.NONE,
             selection = "",
             selectionStart = -1,
             selectionEnd = -1,
             restoreOffset = if (s.isPaged) 0 else offset.coerceIn(0, text.length)
         )
-        persist(percentFor(clamped, page, offset))
+        persist(percentFor(clamped, if (s.isPaged) targetPage else page, offset))
     }
 
     fun goToPage(page: Int) {
