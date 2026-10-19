@@ -143,7 +143,7 @@ object DocumentFactory {
 
     /** One chapter per few pages keeps the TOC usable and TTS chunks sane. */
     private fun buildPdfChapters(pageTexts: List<String>): List<ChapterRef> {
-        val pagesPerChapter = 8
+        val pagesPerChapter = 4
         val chapters = ArrayList<ChapterRef>()
         var offset = 0L
         for (i in pageTexts.indices step pagesPerChapter) {
