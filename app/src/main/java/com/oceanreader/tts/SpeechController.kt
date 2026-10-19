@@ -151,12 +151,12 @@ class SpeechController(private val context: Context) {
         val engine = tts ?: return
         val list = runCatching {
             engine.voices.orEmpty()
-                .sortedWith(compareBy({ it.locale }, { -it.quality }))
+                .sortedBy { it.locale.toString() }
                 .map { v ->
                     VoiceOption(
                         name = v.name,
                         label = describe(v),
-                        locale = v.locale,
+                        locale = v.locale.toString(),
                         quality = v.quality
                     )
                 }
@@ -196,7 +196,7 @@ class SpeechController(private val context: Context) {
         playing = false
         paused = false
         finished = false
-        stopAudio()
+        abandonAudioFocus()
         _state.value = _state.value.copy(
             bookId = bookId,
             segmentCount = segments.size,
@@ -258,7 +258,7 @@ class SpeechController(private val context: Context) {
         playing = false
         paused = true
         publish()
-        ServiceBridge.sync(this)
+        ServiceBridge.sync?.invoke(this)
     }
 
     fun next() = skip(1)
@@ -315,7 +315,9 @@ class SpeechController(private val context: Context) {
     fun setVoice(name: String) {
         voiceName = name
         val engine = tts ?: return
-        runCatching { engine.voices?.firstOrNull { it.name == name } }?.let { engine.voice = it }
+        runCatching { engine.voices?.firstOrNull { it.name == name } }
+            .getOrNull()
+            ?.let { engine.voice = it }
         publish()
         if (playing) restartCurrent()
     }
@@ -329,7 +331,7 @@ class SpeechController(private val context: Context) {
     fun setSleepTimer(minutes: Int) {
         val end = if (minutes <= 0) 0L else System.currentTimeMillis() + minutes * 60_000L
         _state.value = _state.value.copy(sleepTimerEnd = end)
-        ServiceBridge.sync(this)
+        ServiceBridge.sync?.invoke(this)
     }
 
     fun sleepRemaining(): Long =
@@ -390,7 +392,7 @@ class SpeechController(private val context: Context) {
                 Bundle(),
                 utteranceId
             )
-        }.getOr(TextToSpeech.ERROR)
+        }.getOrElse { TextToSpeech.ERROR }
 
         if (result == TextToSpeech.ERROR) {
             playing = false
@@ -426,7 +428,7 @@ class SpeechController(private val context: Context) {
         stopWordCursor()
         abandonAudioFocus()
         publish()
-        ServiceBridge.sync(this)
+        ServiceBridge.sync?.invoke(this)
     }
 
     private fun setCursorFor(index: Int) {
@@ -450,7 +452,9 @@ class SpeechController(private val context: Context) {
             if (next >= segments.size) finish() else speak(next)
         }
 
-        override fun onRangeStart(utteranceId: String?, start: Int, end: Int) {
+        // Word ranges only exist from API 26; declared without `override`
+        // so the class still compiles on older platforms.
+        fun onRangeStart(utteranceId: String?, start: Int, end: Int) {
             val s = segments.getOrNull(_state.value.segmentIndex) ?: return
             if (!highlightWords) return
             supportsWordRange = true
@@ -460,7 +464,7 @@ class SpeechController(private val context: Context) {
             )
         }
 
-        override fun onRangeEnd(utteranceId: String?, start: Int, end: Int) {
+        fun onRangeEnd(utteranceId: String?, start: Int, end: Int) {
             val s = segments.getOrNull(_state.value.segmentIndex) ?: return
             val elapsed = (System.currentTimeMillis() - segmentStartedAt).coerceAtLeast(1L)
             charsPerSecond = (s.text.length * 1000f / elapsed).coerceIn(0.5f, 60f)
@@ -538,7 +542,7 @@ class SpeechController(private val context: Context) {
             highlightWords = highlightWords,
             supportsWords = supportsWordRange
         )
-        ServiceBridge.sync(this)
+        ServiceBridge.sync?.invoke(this)
     }
 
     // ---------------------------------------------------------- audio focus

@@ -1,8 +1,10 @@
 package com.oceanreader.ui.reader
 
+import android.graphics.Typeface
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.LeadingMarginSpan
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -11,8 +13,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,27 +22,26 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.oceanreader.data.BookEntity
+import com.oceanreader.data.Settings
+import com.oceanreader.data.model.FontFamilyOption
+import com.oceanreader.reader.HighlightSpan
 import com.oceanreader.reader.ReaderPanel
 import com.oceanreader.reader.ReaderUiState
 import com.oceanreader.reader.ReaderViewModel
-import com.oceanreader.tts.SpeechController
-import com.oceanreader.ui.components.AuroraIconButton
-import com.oceanreader.ui.theme.LocalAccent
+import com.oceanreader.reader.TextPaginator
 import com.oceanreader.ui.theme.LocalGlass
-import com.oceanreader.ui.theme.SuperCard
-import com.oceanreader.ui.theme.SuperSheet
-import com.oceanreader.ui.theme.glassPanel
-import com.oceanreader.ui.theme.softShadow
-import com.oceanreader.ui.theme.tappable
+import com.oceanreader.ui.components.AuroraIconButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,14 +49,16 @@ fun ReaderScreen(
     bookId: String,
     onBack: () -> Unit,
     vm: ReaderViewModel = viewModel(
-        factory = ReaderViewModelFactory(bookId)
+        factory = ReaderViewModelFactory(
+            app = LocalContext.current.applicationContext as android.app.Application,
+            bookId = bookId
+        )
     )
 ) {
     val state by vm.ui.collectAsState()
     val speechState by vm.speech.state.collectAsState()
     val speechCursor by vm.speech.cursor.collectAsState()
-    val accent = LocalAccent.current
-    val glass = LocalGlass.current
+    val prefs by vm.prefs.collectAsState()
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Reading surface
@@ -64,17 +67,27 @@ fun ReaderScreen(
                 CircularProgressIndicator()
             }
         } else if (state.error != null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(state.error ?: "无法打开", color = MaterialTheme.colorScheme.error)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    state.error ?: "无法打开",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyLarge
+                )
             }
         } else {
             ReaderSurface(
                 state = state,
+                prefs = prefs,
                 speechCursor = speechCursor,
+                vm = vm,
                 onTap = { vm.toggleChrome() },
-                onPageChanged = { page, offset -> vm.onPageRendered(page, offset) },
                 onSelection = { text, start, end -> vm.onSelectionChanged(text, start, end) },
-                onLongPress = { offset -> vm.onSelectionChanged("", offset, offset) }
+                onLongPress = { offset -> vm.onLongPressAt(offset) }
             )
         }
 
@@ -110,7 +123,13 @@ fun ReaderScreen(
                 speechState = speechState,
                 onPrev = vm::previousPage,
                 onNext = vm::nextPage,
-                onProgress = { page -> vm.goToPage(page) },
+                onProgress = { fraction ->
+                    if (state.isPaged) {
+                        vm.goToPage((fraction * state.pageCount).toInt())
+                    } else {
+                        vm.goToPercent(fraction)
+                    }
+                },
                 onSpeechToggle = {
                     if (speechState.playing) vm.stopSpeaking() else vm.startSpeaking()
                 },
@@ -120,12 +139,16 @@ fun ReaderScreen(
 
         // Selection toolbar
         if (state.selection.isNotBlank()) {
+            val clipboard = LocalClipboardManager.current
             SelectionToolbar(
                 text = state.selection,
                 onHighlight = { vm.highlightSelection() },
                 onUnderline = { vm.highlightSelection(underline = true) },
                 onNote = { vm.setPanel(ReaderPanel.NOTES) },
-                onCopy = { /* clipboard */ },
+                onCopy = {
+                    clipboard.setText(AnnotatedString(state.selection))
+                    vm.clearSelection()
+                },
                 onClear = vm::clearSelection,
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
@@ -143,60 +166,162 @@ fun ReaderScreen(
     }
 }
 
+// ------------------------------------------------------------------ surface
+
 @Composable
 private fun ReaderSurface(
     state: ReaderUiState,
+    prefs: Settings,
     speechCursor: com.oceanreader.tts.SpeechCursor,
+    vm: ReaderViewModel,
     onTap: () -> Unit,
-    onPageChanged: (Int, Int) -> Unit,
     onSelection: (String, Int, Int) -> Unit,
     onLongPress: (Int) -> Unit
 ) {
-    val context = LocalContext.current
-    val paginator = remember { com.oceanreader.reader.TextPaginator() }
-    val paint = remember {
-        android.text.TextPaint().apply {
-            isAntiAlias = true
-            isSubpixelText = true
-        }
+    val density = LocalDensity.current
+    val scheme = MaterialTheme.colorScheme
+
+    val typeface = when (prefs.fontFamily) {
+        FontFamilyOption.SANS -> Typeface.SANS_SERIF
+        FontFamilyOption.SERIF -> Typeface.SERIF
+        FontFamilyOption.ROUNDED -> Typeface.create("sans-serif", Typeface.NORMAL)
+        FontFamilyOption.MONO -> Typeface.MONOSPACE
     }
 
-    // Paginate whenever the chapter or style changes.
-    LaunchedEffect(state.chapterText, state.chapterIndex) {
-        paginator.paginate(
-            text = state.chapterText,
-            paint = paint,
-            width = context.resources.displayMetrics.widthPixels,
-            height = context.resources.displayMetrics.heightPixels,
-            spacingMultiplier = 1.6f,
-            spacingAdd = 0
+    val style = remember(prefs.fontSize, prefs.lineSpacing, prefs.horizontalPadding, prefs.verticalPadding, prefs.firstLineIndent, prefs.boldText, prefs.justifyText, prefs.fontFamily, density, scheme) {
+        ReaderStyle(
+            fontSizePx = with(density) { prefs.fontSize.sp.toPx() },
+            lineSpacing = prefs.lineSpacing,
+            marginHorizontalPx = with(density) { prefs.horizontalPadding.dp.toPx() },
+            marginVerticalPx = with(density) { prefs.verticalPadding.dp.toPx() },
+            indentPx = with(density) { (prefs.fontSize * prefs.firstLineIndent).sp.toPx() },
+            bold = prefs.boldText,
+            justify = prefs.justifyText,
+            backgroundColor = scheme.background.toArgb(),
+            textColor = scheme.onBackground.toArgb(),
+            sentenceColor = 0xFFFFB74D.toInt(),
+            wordColor = 0xFFFF9800.toInt(),
+            typeface = typeface
         )
     }
 
-    Box(
+    val paint = remember(style) {
+        android.text.TextPaint().apply {
+            isAntiAlias = true
+            isSubpixelText = true
+            textSize = style.fontSizePx
+            color = style.textColor
+            isFakeBoldText = style.bold
+            typeface = style.typeface
+        }
+    }
+
+    val styledText = remember(state.chapterText, style.indentPx) {
+        if (style.indentPx > 0f) indented(state.chapterText, style.indentPx) else state.chapterText
+    }
+
+    val paginator = remember { TextPaginator() }
+
+    val highlightSpans = remember(state.highlights, state.chapterIndex) {
+        state.highlights
+            .filter { it.chapterIndex == state.chapterIndex }
+            .map {
+                HighlightSpan(
+                    start = it.start,
+                    end = it.end,
+                    color = HighlightColors.getOrElse(it.colorIndex) { HighlightColors[0] },
+                    underline = it.kind == 1
+                )
+            }
+    }
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(scheme.background)
             .clickable(onClick = onTap)
     ) {
+        val widthPx = with(density) { maxWidth.toPx() }
+        val heightPx = with(density) { maxHeight.toPx() }
+
+        // Paginate whenever the chapter, the viewport or the style changes.
+        LaunchedEffect(styledText, paint, widthPx, heightPx, style.lineSpacing, style.justify, style.marginHorizontalPx, style.marginVerticalPx) {
+            val contentW = (widthPx - style.marginHorizontalPx * 2).toInt().coerceAtLeast(1)
+            val contentH = (heightPx - style.marginVerticalPx * 2).toInt().coerceAtLeast(1)
+            paginator.paginate(
+                text = styledText,
+                paint = paint,
+                width = contentW,
+                height = contentH,
+                spacingMultiplier = style.lineSpacing,
+                spacingAdd = 0,
+                justify = style.justify
+            )
+            vm.reportPagination(paginator.pageCount)
+            val restore = state.restoreOffset
+            if (restore > 0 && restore < styledText.length) {
+                val page = paginator.pageOf(restore)
+                vm.setPage(page, restore)
+            }
+        }
+
+        // Follow the voice: keep the spoken sentence on screen (跟读).
+        LaunchedEffect(speechCursor.chapterIndex, speechCursor.sentenceStart, state.chapterIndex, state.loading) {
+            if (state.loading || !speechCursor.hasSentence) return@LaunchedEffect
+            if (speechCursor.chapterIndex != state.chapterIndex) {
+                vm.goToChapter(speechCursor.chapterIndex)
+            } else {
+                val target = paginator.pageOf(speechCursor.sentenceStart)
+                if (target != state.pageIndex) {
+                    vm.setPage(target, paginator.startOf(target))
+                }
+            }
+        }
+
         if (state.isPaged) {
             PdfPageView(
+                filePath = state.book?.filePath.orEmpty(),
                 page = state.pageIndex,
                 pageCount = state.pageCount,
-                onPageChanged = { onPageChanged(it, 0) }
+                onPageChanged = { page -> vm.onPageRendered(page, 0) }
             )
         } else {
             TextPageView(
+                style = style,
                 paginator = paginator,
                 page = state.pageIndex,
                 speechCursor = speechCursor,
-                onPageChanged = onPageChanged,
-                onSelection = onSelection,
+                highlights = highlightSpans,
+                onPageChanged = { page, offset ->
+                    vm.onPageRendered(page, offset)
+                    onSelection("", -1, -1)
+                },
                 onLongPress = onLongPress
             )
         }
     }
 }
+
+/** Applies a first-line indent to every paragraph via margin spans. */
+private fun indented(text: String, indentPx: Float): CharSequence {
+    if (text.isEmpty() || indentPx <= 0f) return text
+    val out = SpannableStringBuilder(text)
+    var offset = 0
+    for (line in text.split("\n")) {
+        if (line.isNotBlank()) {
+            out.setSpan(
+                LeadingMarginSpan.Standard(indentPx.toInt(), 0),
+                offset,
+                offset + line.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+        offset += line.length + 1
+    }
+    return out
+}
+
+// ------------------------------------------------------------------- chrome
 
 @Composable
 private fun ReaderTopBar(
@@ -261,11 +386,16 @@ private fun ReaderBottomBar(
     speechState: com.oceanreader.tts.SpeechState,
     onPrev: () -> Unit,
     onNext: () -> Unit,
-    onProgress: (Int) -> Unit,
+    onProgress: (Float) -> Unit,
     onSpeechToggle: () -> Unit,
     onSpeechPanel: () -> Unit
 ) {
     val glass = LocalGlass.current
+    var sliderPosition by remember { mutableFloatStateOf(state.percent) }
+
+    // Re-sync when the book itself moves the progress (e.g. speech follow).
+    LaunchedEffect(state.percent) { sliderPosition = state.percent }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = glass.bottomBarTint.copy(alpha = 0.92f),
@@ -280,15 +410,24 @@ private fun ReaderBottomBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "${(state.percent * 100).toInt()}%",
+                    if (state.isPaged) {
+                        "第 ${state.pageIndex + 1} / ${state.pageCount} 页"
+                    } else {
+                        "第 ${state.pageIndex + 1} / ${state.flowPages} 页"
+                    },
                     style = MaterialTheme.typography.labelSmall
                 )
                 Slider(
-                    value = state.percent,
-                    onValueChange = { onProgress((it * 100).toInt()) },
+                    value = sliderPosition,
+                    onValueChange = { sliderPosition = it },
+                    onValueChangeFinished = { onProgress(sliderPosition) },
                     modifier = Modifier
                         .weight(1f)
                         .padding(horizontal = 8.dp)
+                )
+                Text(
+                    "${(state.percent * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall
                 )
             }
 
@@ -338,8 +477,9 @@ private fun SelectionToolbar(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        shape = SuperCard,
+            .padding(16.dp)
+            .navigationBarsPadding(),
+        shape = RoundedCornerShape(18.dp),
         tonalElevation = 4.dp
     ) {
         Row(
@@ -362,6 +502,8 @@ private fun SelectionToolbar(
     }
 }
 
+// ------------------------------------------------------------------- panels
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReaderPanelSheet(
@@ -372,7 +514,7 @@ private fun ReaderPanelSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape = SuperSheet,
+        shape = RoundedCornerShape(28.dp),
         containerColor = MaterialTheme.colorScheme.surface
     ) {
         when (panel) {
@@ -411,6 +553,7 @@ private fun TocPanel(state: ReaderUiState, vm: ReaderViewModel) {
 
 @Composable
 private fun AppearancePanel(vm: ReaderViewModel) {
+    val prefs by vm.prefs.collectAsState()
     Column(modifier = Modifier.padding(16.dp)) {
         Text("排版设置", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(16.dp))
@@ -418,9 +561,10 @@ private fun AppearancePanel(vm: ReaderViewModel) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("字号", modifier = Modifier.weight(1f))
             Slider(
-                value = 18f,
-                onValueChange = { },
+                value = prefs.fontSize.toFloat(),
+                onValueChange = { size -> vm.setFont { store -> store.setFontSize(size.toInt()) } },
                 valueRange = 12f..32f,
+                steps = 19,
                 modifier = Modifier.weight(2f)
             )
         }
@@ -428,9 +572,19 @@ private fun AppearancePanel(vm: ReaderViewModel) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("行距", modifier = Modifier.weight(1f))
             Slider(
-                value = 1.6f,
-                onValueChange = { },
+                value = prefs.lineSpacing,
+                onValueChange = { v -> vm.setFont { store -> store.setLineSpacing((v * 100).toInt()) } },
                 valueRange = 1.0f..2.5f,
+                modifier = Modifier.weight(2f)
+            )
+        }
+        // Margins
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("边距", modifier = Modifier.weight(1f))
+            Slider(
+                value = prefs.horizontalPadding.toFloat(),
+                onValueChange = { v -> vm.setFont { store -> store.setMarginH(v.toInt()) } },
+                valueRange = 8f..56f,
                 modifier = Modifier.weight(2f)
             )
         }

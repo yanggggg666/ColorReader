@@ -102,7 +102,7 @@ class SpeechService : Service() {
             .setSmallIcon(R.drawable.ic_stat_speech)
             .setContentTitle(state.chapterTitle())
             .setContentText(state.subtitle(controller))
-            .setSubText(state.bookTitle)
+            .setSubText(state.bookId)
             .setContentIntent(open)
             .setOngoing(state.playing)
             .setOnlyAlertOnce(true)
@@ -115,25 +115,30 @@ class SpeechService : Service() {
         if (total > 0) {
             val done = (state.segmentIndex + 1).coerceAtMost(total)
             builder.setProgress(total, done, false)
-            builder.setStyle(
-                MediaStyle()
-                    .setShowActionsInCompactView(0, 1, 2)
-                    .addAction(
-                        R.drawable.ic_stat_previous,
-                        "上一句",
-                        serviceIntent(ACTION_PREV, 1)
-                    )
-                    .addAction(
-                        if (state.playing) R.drawable.ic_stat_pause else R.drawable.ic_stat_play,
-                        if (state.playing) "暂停" else "继续",
-                        serviceIntent(if (state.playing) ACTION_PAUSE else ACTION_PLAY, 2)
-                    )
-                    .addAction(
-                        R.drawable.ic_stat_next,
-                        "下一句",
-                        serviceIntent(ACTION_NEXT, 3)
-                    )
+            builder.addAction(
+                R.drawable.ic_stat_skip_previous,
+                "上一句",
+                serviceIntent(ACTION_PREV, 1)
             )
+            if (state.playing) {
+                builder.addAction(
+                    R.drawable.ic_stat_pause,
+                    "暂停",
+                    serviceIntent(ACTION_PAUSE, 2)
+                )
+            } else {
+                builder.addAction(
+                    R.drawable.ic_stat_play,
+                    "继续",
+                    serviceIntent(ACTION_PLAY, 2)
+                )
+            }
+            builder.addAction(
+                R.drawable.ic_stat_skip_next,
+                "下一句",
+                serviceIntent(ACTION_NEXT, 3)
+            )
+            builder.setStyle(MediaStyle().setShowActionsInCompactView(0, 1, 2))
         }
         return builder.build()
     }
@@ -176,7 +181,7 @@ class SpeechService : Service() {
     }
 }
 
-private fun SpeechState.chapterTitle(): String = bookTitle.ifBlank { "朗读" }
+private fun SpeechState.chapterTitle(): String = bookId.ifBlank { "朗读" }
 
 private fun SpeechState.subtitle(controller: SpeechController?): String {
     val total = segmentCount

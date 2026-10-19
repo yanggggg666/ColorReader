@@ -86,7 +86,7 @@ val BookBodyStyle = TextStyle(
     fontSize = 17.sp, lineHeight = 28.sp
 )
 
-fun bodyLineHeightStyle(alignment: Int) = LineHeightStyle(
-    alignment = LineHeightStyle.Alignment(alignment, alignment),
+fun bodyLineHeightStyle(alignment: Float = 0.5f) = LineHeightStyle(
+    alignment = LineHeightStyle.Alignment(alignment),
     trim = LineHeightStyle.Trim.None
 )

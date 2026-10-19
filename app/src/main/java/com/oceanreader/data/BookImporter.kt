@@ -107,11 +107,6 @@ class BookImporter(
                 )
                 db.bookDao().upsert(entity)
 
-                // Persist the parse result so the reader opens instantly next time.
-                parsedCache(target).writeBytes(
-                    ParseCacheIO.encode(parsed, id).toByteArray(Charsets.UTF_8)
-                )
-
                 onStep(ImportStep.Done)
                 ImportResult.Success(entity)
             } catch (e: SecurityException) {
@@ -131,14 +126,12 @@ class BookImporter(
         val updated = book.copy(
             title = parsed.title.ifBlank { book.title },
             author = parsed.author.ifBlank { book.author },
-            description = parsed.description,
             chapterCount = parsed.chapters.size,
             totalChars = parsed.body.length.toLong(),
             coverPath = coverPath,
             totalPages = if (parsed.pageTexts.isNotEmpty()) parsed.pageTexts.size else book.totalPages
         )
         db.bookDao().upsert(updated)
-        parsedCache(file).writeBytes(ParseCacheIO.encode(parsed, book.id).toByteArray(Charsets.UTF_8))
         updated
     }
 
@@ -210,23 +203,3 @@ private fun DocumentFactory.probeByName(name: String): com.oceanreader.parse.For
     return com.oceanreader.parse.FormatProbe(format, format.label, format != DocFormat.UNKNOWN)
 }
 
-private fun ParseCacheIO.encode(parsed: ParsedDoc, bookId: String): String {
-    val sb = StringBuilder()
-    sb.append("OCRD1\n")
-    sb.append(bookId).append('\n')
-    sb.append(parsed.title.replace("\n", " ")).append('\n')
-    sb.append(parsed.author.replace("\n", " ")).append('\n')
-    sb.append(parsed.description.replace("\n", " ")).append('\n')
-    sb.append(parsed.readerKind.name).append('\n')
-    sb.append(parsed.chapters.size).append('\n')
-    for (c in parsed.chapters) {
-        sb.append(c.index).append('\t')
-            .append(c.startOffset).append('\t')
-            .append(c.length).append('\t')
-            .append(c.page).append('\t')
-            .append(c.title.replace("\n", " ").replace("\t", " ")).append('\n')
-    }
-    sb.append("BODY\n")
-    sb.append(parsed.body)
-    return sb.toString()
-}

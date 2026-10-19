@@ -183,16 +183,16 @@ object DocParser {
                     val len = buf.getInt(at + 4)
                     val start = at + 8
                     if (len <= 0 || start + len * 2 > data.size) "" else {
-                        String(data, start, len * 2, Charsets.UTF_16LE).trimEnd('
-')
+                        String(data, start, len * 2, Charsets.UTF_16LE)
+                            .trimEnd(' ', '\u0000')
                     }
                 }
                 31 -> { // VT_LPWSTR (variant)
                     val len = buf.getInt(at + 4)
                     val start = at + 8
                     if (len <= 0 || start + len > data.size) "" else {
-                        String(data, start, len, Charsets.ISO_8859_1).trimEnd('
-')
+                        String(data, start, len, Charsets.LATIN1)
+                            .trimEnd(' ', '\u0000')
                     }
                 }
                 else -> ""

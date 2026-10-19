@@ -14,6 +14,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 
 /** Tokens for the frosted surfaces used across the shell. */
 @Immutable
@@ -150,11 +151,11 @@ fun ColorReaderTheme(
             colorScheme = scheme,
             typography = ReaderTypography,
             shapes = androidx.compose.material3.Shapes(
-                extraSmall = SuperCircle,
-                small = SuperCard,
-                medium = SuperCard,
-                large = SuperSheet,
-                extraLarge = SuperSheet
+                extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(50),
+                small = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                medium = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                large = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(28.dp)
             ),
             content = content
         )

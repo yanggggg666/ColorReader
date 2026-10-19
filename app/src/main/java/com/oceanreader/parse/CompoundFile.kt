@@ -27,8 +27,8 @@ class CompoundFile private constructor(private val data: ByteArray) {
     )
 
     companion object {
-        private const val FREE_SECT = 0xFFFFFFFF
-        private const val END_OF_CHAIN = 0xFFFFFFFE
+        private const val FREE_SECT = 0xFFFFFFFF.toInt()
+        private const val END_OF_CHAIN = 0xFFFFFFFE.toInt()
         private const val DIFAT_SECT = 0xFFFFFFFD
 
         fun open(file: java.io.File): CompoundFile {
@@ -172,12 +172,19 @@ class CompoundFile private constructor(private val data: ByteArray) {
     private fun u16(off: Int): Int = le16(data, off)
     private fun u32(off: Int): Int = intAt(data, off)
 
+    /** Reads a little-endian 32-bit integer from the file header. */
+    private fun intAt(off: Int): Int = ByteBuffer.wrap(data, off, 4).order(ByteOrder.LITTLE_ENDIAN).int
+
     private fun le16(b: ByteArray, off: Int): Int =
         (b[off].toInt() and 0xFF) or ((b[off + 1].toInt() and 0xFF) shl 8)
 
-    private fun intAt(b: ByteArray, off: Int): Int =
-        ByteBuffer.wrap(b, off, 4).order(ByteOrder.LITTLE_ENDIAN).int
+    private fun intAt(b: ByteArray, off: Int): Int {
+        if (off + 4 > b.size) return -1
+        return ByteBuffer.wrap(b, off, 4).order(ByteOrder.LITTLE_ENDIAN).int
+    }
 
-    private fun longAt(b: ByteArray, off: Int): Long =
-        ByteBuffer.wrap(b, off, 8).order(ByteOrder.LITTLE_ENDIAN).long
+    private fun longAt(b: ByteArray, off: Int): Long {
+        if (off + 8 > b.size) return 0L
+        return ByteBuffer.wrap(b, off, 8).order(ByteOrder.LITTLE_ENDIAN).long
+    }
 }

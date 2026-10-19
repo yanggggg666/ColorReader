@@ -28,10 +28,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.oceanreader.data.BookEntity
+import com.oceanreader.data.db.BookEntity
 import com.oceanreader.ui.components.EmptyState
-import com.oceanreader.ui.theme.LocalAccent
-import com.oceanreader.ui.theme.SuperCard
+import androidx.compose.foundation.ExperimentalFoundationApi
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -40,11 +39,18 @@ fun ShelfScreen(
     onOpenBook: (String) -> Unit,
     onSettings: () -> Unit,
     onStats: () -> Unit = {},
-    onImport: (Array<String>) -> Unit = {},
+    onImportRequest: () -> Unit = {},
     vm: ShelfViewModel = viewModel()
 ) {
     val state by vm.ui.collectAsState()
     val context = LocalContext.current
+
+    // The activity publishes picks here; only one listener is live at a time.
+    DisposableEffect(vm) {
+        val listener: (android.net.Uri) -> Unit = { uri -> vm.import(uri) }
+        com.oceanreader.ImportBus.request(listener)
+        onDispose { }
+    }
 
     Scaffold(
         topBar = {
@@ -59,7 +65,7 @@ fun ShelfScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { vm.openImportPicker { uri -> vm.import(uri) } },
+                onClick = { onImportRequest.invoke() },
                 containerColor = MaterialTheme.colorScheme.primary
             ) {
                 Icon(Icons.Default.Add, contentDescription = "导入书籍")
@@ -90,7 +96,10 @@ fun ShelfScreen(
             if (state.selection.isNotEmpty()) {
                 SelectionBar(
                     count = state.selection.size,
-                    onPin = { vm.pinSelected(!state.books.firstOrNull { it.id in state.selection }?.pinned ?: false) },
+                    onPin = {
+                        val pinned = state.books.firstOrNull { it.id in state.selection }?.pinned ?: false
+                        vm.pinSelected(!pinned)
+                    },
                     onDelete = vm::deleteSelected,
                     onClear = vm::clearSelection
                 )
@@ -141,7 +150,7 @@ private fun ContinueReadingCard(
         modifier = modifier
             .fillMaxWidth()
             .height(120.dp),
-        shape = SuperCard,
+        shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp
     ) {
@@ -254,6 +263,7 @@ fun BookCover(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BookGridItem(
     book: BookEntity,

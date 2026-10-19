@@ -206,6 +206,7 @@ class BookRepository(
     fun fileOf(book: BookEntity): java.io.File = java.io.File(book.filePath)
 
     fun appContext(): Context = context
+
     fun totalReadingMillis(): Flow<Long> = statDao.observeTotalMillis()
 
     fun today(): String = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date())
@@ -215,24 +216,4 @@ class BookRepository(
     suspend fun parse(book: BookEntity): ParsedDoc = withContext(Dispatchers.IO) {
         DocumentFactory.parse(File(book.filePath))
     }
-
-    fun formatOf(book: BookEntity): DocFormat =
-        runCatching { DocFormat.valueOf(book.format) }.getOrDefault(DocFormat.UNKNOWN)
-
-    fun isPaged(book: BookEntity): Boolean =
-        formatOf(book) == DocFormat.PDF || runCatching { DocFormat.valueOf(book.format) } == null
-
-    fun readerKind(book: BookEntity): ReaderKind =
-        if (formatOf(book) == DocFormat.PDF) ReaderKind.PAGED else ReaderKind.FLOW
-
-    fun coverBitmap(book: BookEntity, maxSize: Int = 512): Bitmap? {
-        val path = book.coverPath ?: return null
-        val file = File(path)
-        if (!file.exists()) return null
-        return DocumentFactory.decodeThumbnail(path, maxSize)
-    }
-
-    fun fileOf(book: BookEntity): File = File(book.filePath)
-
-    fun appContext(): Context = context
 }

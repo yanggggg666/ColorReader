@@ -1,5 +1,7 @@
 package com.oceanreader.tts
 
+import com.oceanreader.data.model.SpeechSegment
+
 /**
  * Splits a chapter into speakable sentences.
  *

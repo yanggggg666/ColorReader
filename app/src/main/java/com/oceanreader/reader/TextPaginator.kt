@@ -44,38 +44,52 @@ class TextPaginator {
         height: Int,
         spacingMultiplier: Float,
         spacingAdd: Int,
-        includePad: Boolean = false
+        includePad: Boolean = false,
+        alignment: Layout.Alignment = Layout.Alignment.ALIGN_NORMAL,
+        justify: Boolean = false
     ) {
         pageStarts.clear()
         val w = width.coerceAtLeast(1)
         val h = height.coerceAtLeast(1)
         val sl = StaticLayout.Builder
             .obtain(text, 0, text.length, paint, w)
-            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setAlignment(alignment)
             .setLineSpacing(spacingAdd.toFloat(), spacingMultiplier)
             .setIncludePad(includePad)
             .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
             .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+            .apply {
+                if (justify && android.os.Build.VERSION.SDK_INT >= 26) {
+                    setJustificationMode(android.text.Layout.JUSTIFICATION_MODE_INTER_WORD)
+                }
+            }
             .build()
         layout = sl
         textLength = text.length
         pageHeight = h
 
-        if (sl.lineCount <= 1 || textLength == 0) {
-            pageStarts.add(0)
-            return
-        }
+        // Page 0 always starts at the first character; every later page starts
+        // on the first line that begins at or below its page boundary.
+        pageStarts.add(0)
+        if (sl.lineCount <= 1 || textLength == 0) return
 
-        var offset = 0
         var guard = 0
-        while (offset < textLength && guard++ < 20_000) {
-            val line = sl.getLineForVertical((guard - 1) * h)
+        while (guard++ < 10_000) {
+            // Vertical coordinate just past the last completed page.
+            val y = pageStarts.size * h
+            if (y >= sl.height) break
+            val line = sl.getLineForVertical(y)
             if (line >= sl.lineCount) break
-            offset = sl.getLineEnd(line)
-            pageStarts.add(offset)
+            var offset = sl.getLineStart(line)
+            if (offset <= pageStarts.last()) {
+                // The boundary cuts through a line: the next page begins on
+                // the following line so no line is ever split in half.
+                if (line + 1 >= sl.lineCount) break
+                offset = sl.getLineStart(line + 1)
+            }
             if (offset >= textLength) break
+            pageStarts.add(offset)
         }
-        if (pageStarts.isEmpty()) pageStarts.add(0)
     }
 
     val pageCount: Int get() = pageStarts.size.coerceAtLeast(1)

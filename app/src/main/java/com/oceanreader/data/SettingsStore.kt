@@ -14,8 +14,6 @@ import com.oceanreader.data.model.DarkMode
 import com.oceanreader.data.model.FontFamilyOption
 import com.oceanreader.data.model.PageTurnMode
 import com.oceanreader.data.model.ShelfSort
-import com.oceanreader.data.model.ThemeMode
-import com.oceanreader.data.model.Typeface
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -50,6 +48,7 @@ data class Settings(
     val copyOnImport: Boolean = true,
     val shelfSort: ShelfSort = ShelfSort.RECENT,
     val showCoverGrid: Boolean = true,
+    val gridColumns: Int = 0,
     val immersiveHint: Boolean = true
 )
 
@@ -57,7 +56,7 @@ data class Settings(
 class SettingsStore(private val context: Context) {
 
     private object Keys {
-        val FONT = intPreferencesKey("font_family")
+        val FONT = stringPreferencesKey("font_family")
         val FONT_SIZE = intPreferencesKey("font_size")
         val LINE_SPACING = intPreferencesKey("line_spacing")
         val PARA_SPACING = intPreferencesKey("para_spacing")
@@ -76,21 +75,18 @@ class SettingsStore(private val context: Context) {
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val TTS_SPEED = floatPreferencesKey("tts_speed")
         val TTS_PITCH = floatPreferencesKey("tts_pitch")
-        val TTS_ENGINE = stringPreferencesKey("tts_engine")
         val TTS_VOICE = stringPreferencesKey("tts_voice")
         val TTS_HIGHLIGHT = booleanPreferencesKey("tts_highlight")
         val TTS_AUTO_NEXT = booleanPreferencesKey("tts_auto_next")
-        val SORT_MODE = intPreferencesKey("sort_mode")
+        val SORT_MODE = stringPreferencesKey("sort_mode")
         val GRID_COLUMNS = intPreferencesKey("grid_columns")
-        val SHOW_COVER_PROGRESS = booleanPreferencesKey("show_cover_progress")
-        val LAST_BOOK = stringPreferencesKey("last_book")
-        val ONBOARDED = booleanPreferencesKey("onboarded")
+        val SHOW_COVER_GRID = booleanPreferencesKey("show_cover_grid")
     }
 
     /** Emits the full resolved preference snapshot. */
     val prefs: Flow<Settings> = context.dataStore.data.map { p ->
         Settings(
-            darkMode = DarkMode.valueOf(p[Keys.THEME_MODE] ?: "SYSTEM"),
+            darkMode = DarkMode.valueOf(p[Keys.THEME_MODE] ?: DarkMode.SYSTEM.name),
             accentIndex = p[Keys.ACCENT] ?: 0,
             dynamicColor = p[Keys.DYNAMIC_COLOR] ?: true,
             pagePalette = p[Keys.PAGE_PALETTE] ?: "white",
@@ -119,7 +115,8 @@ class SettingsStore(private val context: Context) {
             copyOnImport = true,
             shelfSort = runCatching { ShelfSort.valueOf(p[Keys.SORT_MODE] ?: "RECENT") }
                 .getOrDefault(ShelfSort.RECENT),
-            showCoverGrid = p[Keys.SHOW_COVER_PROGRESS] ?: true,
+            showCoverGrid = p[Keys.SHOW_COVER_GRID] ?: true,
+            gridColumns = p[Keys.GRID_COLUMNS] ?: 0,
             immersiveHint = true
         )
     }
@@ -143,12 +140,12 @@ class SettingsStore(private val context: Context) {
     suspend fun setFontFamily(v: FontFamilyOption) = put(Keys.FONT, v.key)
     suspend fun setTtsSpeed(v: Float) = put(Keys.TTS_SPEED, v.coerceIn(0.3f, 3f))
     suspend fun setTtsPitch(v: Float) = put(Keys.TTS_PITCH, v.coerceIn(0.5f, 2f))
-    suspend fun setTtsVoice(v: String?) = put(Keys.TTS_VOICE, v)
+    suspend fun setTtsVoice(v: String?) = put(Keys.TTS_VOICE, v.orEmpty())
     suspend fun setTtsHighlight(v: Boolean) = put(Keys.TTS_HIGHLIGHT, v)
     suspend fun setTtsAutoNext(v: Boolean) = put(Keys.TTS_AUTO_NEXT, v)
     suspend fun setShelfSort(v: ShelfSort) = put(Keys.SORT_MODE, v.name)
     suspend fun setGridColumns(v: Int) = put(Keys.GRID_COLUMNS, v.coerceIn(0, 5))
-    suspend fun setShowCoverProgress(v: Boolean) = put(Keys.SHOW_COVER_PROGRESS, v)
+    suspend fun setShowCoverGrid(v: Boolean) = put(Keys.SHOW_COVER_GRID, v)
 
     private suspend fun <T> put(key: Preferences.Key<T>, value: T) {
         context.dataStore.edit { it[key] = value }

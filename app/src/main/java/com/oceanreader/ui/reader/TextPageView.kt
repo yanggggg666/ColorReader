@@ -1,32 +1,75 @@
 package com.oceanreader.ui.reader
 
+import android.graphics.Canvas
+import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import com.oceanreader.reader.HighlightSpan
 import com.oceanreader.reader.TextPaginator
 import com.oceanreader.tts.SpeechCursor
+
+/**
+ * Resolved visual style for the flowing-text renderer.
+ *
+ * Everything is already converted to pixels: Compose dp/sp never reaches the
+ * [TextPaginator], which works purely on [android.text.TextPaint].
+ */
+data class ReaderStyle(
+    val fontSizePx: Float,
+    val lineSpacing: Float,
+    val marginHorizontalPx: Float,
+    val marginVerticalPx: Float,
+    val indentPx: Float,
+    val bold: Boolean,
+    val justify: Boolean,
+    @androidx.annotation.ColorInt val backgroundColor: Int,
+    @androidx.annotation.ColorInt val textColor: Int,
+    @androidx.annotation.ColorInt val sentenceColor: Int,
+    @androidx.annotation.ColorInt val wordColor: Int,
+    val typeface: android.graphics.Typeface? = null
+)
+
+/** Default highlight palette (matches the settings screen chips). */
+val HighlightColors: List<Int> = listOf(
+    0xFFFFF176.toInt(), // yellow
+    0xFFAED581.toInt(), // green
+    0xFF90CAF9.toInt(), // blue
+    0xFFF48FB1.toInt()  // pink
+)
 
 /**
  * Draws the current page of flowing text through [TextPaginator].
  *
  * The paginator owns the `StaticLayout`; we only ask for the page's character
  * range and paint it, which keeps recomposition cheap on every TTS cursor
- * update.
+ * update. User highlights and the TTS cursor are painted as rects in layout
+ * space, so the text itself is never rebuilt while reading.
  */
 @Composable
 fun TextPageView(
+    style: ReaderStyle,
     paginator: TextPaginator,
     page: Int,
     speechCursor: SpeechCursor,
+    highlights: List<HighlightSpan>,
     onPageChanged: (Int, Int) -> Unit,
-    onSelection: (String, Int, Int) -> Unit,
     onLongPress: (Int) -> Unit
 ) {
     val pageCount = paginator.pageCount
@@ -35,7 +78,7 @@ fun TextPageView(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(androidx.compose.ui.graphics.Color(style.backgroundColor))
             .pointerInput(pageCount) {
                 detectVerticalDragGestures(
                     onDragStart = { dragOffset = 0f },
@@ -56,9 +99,11 @@ fun TextPageView(
                 detectTapGestures(
                     onLongPress = { offset ->
                         val l = paginator.layout() ?: return@detectTapGestures
-                        val localY = offset.y - dragOffset
-                        val line = l.getLineForVertical(localY.toInt().coerceAtLeast(0))
-                        val charOffset = l.getOffsetForHorizontal(line, offset.x)
+                        val localY = (offset.y - dragOffset - style.marginVerticalPx)
+                            .toInt().coerceAtLeast(0)
+                        val line = l.getLineForVertical(localY)
+                        if (line !in 0 until l.lineCount) return@detectTapGestures
+                        val charOffset = l.getOffsetForHorizontal(line, offset.x - style.marginHorizontalPx)
                         onLongPress(charOffset)
                     }
                 )
@@ -76,51 +121,83 @@ fun TextPageView(
             val wordStart = speechCursor.wordStart
             val wordEnd = speechCursor.wordEnd
 
-            drawContext.canvas.nativeCanvas.apply {
-                save()
-                translate(top = -top + dragOffset)
+            drawIntoCanvas { canvas ->
+                val native: Canvas = canvas.nativeCanvas
+                native.save()
+                native.translate(
+                    style.marginHorizontalPx,
+                    style.marginVerticalPx - top + dragOffset
+                )
 
-                // Sentence highlight
-                if (sentenceEnd > sentenceStart) {
-                    val sLine = l.getLineForOffset(sentenceStart)
-                    val eLine = l.getLineForOffset(sentenceEnd - 1)
-                    for (line in sLine..eLine.coerceAtMost(l.lineCount - 1)) {
-                        val lineStart = l.getLineStart(line).coerceAtLeast(sentenceStart)
-                        val lineEnd = l.getLineEnd(line).coerceAtMost(sentenceEnd)
+                // Paints one highlight range as a run of line rects.
+                fun paintRange(rangeStart: Int, rangeEnd: Int, color: Int, alpha: Int) {
+                    if (rangeEnd <= rangeStart) return
+                    val paint = Paint().apply {
+                        this.color = withAlpha(color, alpha)
+                        isAntiAlias = true
+                    }
+                    val firstLine = l.getLineForOffset(rangeStart).coerceIn(0, l.lineCount - 1)
+                    val lastLine = l.getLineForOffset(rangeEnd - 1).coerceIn(0, l.lineCount - 1)
+                    for (line in firstLine..lastLine) {
+                        val lineStart = l.getLineStart(line).coerceAtLeast(rangeStart)
+                        val lineEnd = l.getLineEnd(line).coerceAtMost(rangeEnd)
+                        if (lineEnd <= lineStart) continue
                         val x1 = l.getPrimaryHorizontal(lineStart)
-                        val x2 = if (lineEnd > lineStart) {
-                            l.getSecondaryHorizontal(lineEnd)
-                        } else x1
-                        drawRect(
-                            x1, l.getLineTop(line).toFloat(),
-                            x2, l.getLineBottom(line).toFloat(),
-                            android.graphics.Paint().apply {
-                                color = 0x33FFB74D
-                                style = android.graphics.Paint.Style.FILL
-                            }
+                        val x2 = l.getSecondaryHorizontal(lineEnd)
+                        native.drawRect(
+                            x1,
+                            l.getLineTop(line).toFloat(),
+                            x2,
+                            l.getLineBottom(line).toFloat(),
+                            paint
                         )
                     }
                 }
 
-                // Word highlight
+                fun paintUnderline(rangeStart: Int, rangeEnd: Int, color: Int) {
+                    if (rangeEnd <= rangeStart) return
+                    val paint = Paint().apply {
+                        this.color = color
+                        style = Paint.Style.STROKE
+                        strokeWidth = 2.5f
+                        isAntiAlias = true
+                    }
+                    val firstLine = l.getLineForOffset(rangeStart).coerceIn(0, l.lineCount - 1)
+                    val lastLine = l.getLineForOffset(rangeEnd - 1).coerceIn(0, l.lineCount - 1)
+                    for (line in firstLine..lastLine) {
+                        val lineStart = l.getLineStart(line).coerceAtLeast(rangeStart)
+                        val lineEnd = l.getLineEnd(line).coerceAtMost(rangeEnd)
+                        if (lineEnd <= lineStart) continue
+                        val y = l.getLineBottom(line) - 2f
+                        native.drawLine(
+                            l.getPrimaryHorizontal(lineStart),
+                            y,
+                            l.getSecondaryHorizontal(lineEnd),
+                            y,
+                            paint
+                        )
+                    }
+                }
+
+                // User highlights first, so the TTS cursor composites over them.
+                for (h in highlights) {
+                    if (h.underline) paintUnderline(h.start, h.end, h.color)
+                    else paintRange(h.start, h.end, h.color, h.alpha)
+                }
+
+                // Sentence highlight (跟读)
+                if (sentenceEnd > sentenceStart) {
+                    paintRange(sentenceStart, sentenceEnd, style.sentenceColor, 58)
+                }
+
+                // Word highlight (跟读)
                 if (wordEnd > wordStart) {
-                    val line = l.getLineForOffset(wordStart)
-                    if (line in 0 until l.lineCount) {
-                        val x1 = l.getPrimaryHorizontal(wordStart)
-                        val x2 = l.getSecondaryHorizontal(wordEnd.coerceAtMost(l.getLineEnd(line)))
-                        drawRect(
-                            x1, l.getLineTop(line).toFloat(),
-                            x2, l.getLineBottom(line).toFloat(),
-                            android.graphics.Paint().apply {
-                                color = 0x66FF9800
-                                style = android.graphics.Paint.Style.FILL
-                            }
-                        )
-                    }
+                    paintRange(wordStart, wordEnd, style.wordColor, 150)
                 }
 
-                l.draw(this)
-                restore()
+                // The text itself
+                l.draw(native)
+                native.restore()
             }
         }
     }
@@ -129,8 +206,8 @@ fun TextPageView(
 /**
  * Renders a PDF page through the platform renderer.
  *
- * The bitmap is produced off the main thread by [PdfPageRenderer] and drawn
- * into the canvas with the page's aspect ratio preserved.
+ * The bitmap is produced off the main thread by [com.oceanreader.parse.pdf.PdfPageRenderer]
+ * and drawn centred, with the page aspect ratio preserved.
  */
 @Composable
 fun PdfPageView(
@@ -141,7 +218,9 @@ fun PdfPageView(
 ) {
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    val renderer = remember(filePath) { com.oceanreader.parse.pdf.PdfPageRenderer(java.io.File(filePath)) }
+    val renderer = remember(filePath) {
+        com.oceanreader.parse.pdf.PdfPageRenderer(java.io.File(filePath))
+    }
 
     LaunchedEffect(page, filePath) {
         bitmap = renderer.render(page, 1080, 1920)
@@ -170,16 +249,17 @@ fun PdfPageView(
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val bmp = bitmap ?: return@Canvas
-            val scale = minOf(size.width / bmp.width, size.height / bmp.height)
-            val w = bmp.width * scale
-            val h = bmp.height * scale
-            val dx = (size.width - w) / 2f
-            val dy = (size.height - h) / 2f
-            drawContext.canvas.nativeCanvas.apply {
-                save()
-                translate(dx, dy + dragOffset)
-                drawBitmap(bmp, 0f, 0f, null)
-                restore()
+            drawIntoCanvas { canvas ->
+                val native: Canvas = canvas.nativeCanvas
+                val scale = minOf(size.width / bmp.width, size.height / bmp.height)
+                val w = bmp.width * scale
+                val h = bmp.height * scale
+                val dx = (size.width - w) / 2f
+                val dy = (size.height - h) / 2f
+                native.save()
+                native.translate(dx, dy + dragOffset)
+                native.drawBitmap(bmp, 0f, 0f, null)
+                native.restore()
             }
         }
     }
@@ -187,4 +267,9 @@ fun PdfPageView(
     DisposableEffect(Unit) {
         onDispose { renderer.close() }
     }
+}
+
+private fun withAlpha(color: Int, alpha: Int): Int {
+    val a = ((color ushr 24) and 0xFF) * alpha / 255
+    return (a shl 24) or (color and 0x00FFFFFF)
 }

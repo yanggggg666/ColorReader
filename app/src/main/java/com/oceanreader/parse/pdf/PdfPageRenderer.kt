@@ -77,13 +77,9 @@ class PdfPageRenderer(file: File) {
 /** Small LRU cache for decoded page bitmaps. */
 class BitmapCache(private val maxBytes: Int) {
 
-    private val entries = object : LinkedHashMap<String, Bitmap>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean {
-            var total = 0
-            entries.values.forEach { total += it.byteCount }
-            return total > maxBytes
-        }
-    }
+    private val entries = LinkedHashMap<String, Bitmap>(16, 0.75f, true)
+
+    private fun currentBytes(): Int = entries.values.sumOf { it.byteCount }
 
     @Synchronized
     fun get(key: String): Bitmap? = entries[key]
@@ -91,6 +87,11 @@ class BitmapCache(private val maxBytes: Int) {
     @Synchronized
     fun put(key: String, bitmap: Bitmap) {
         entries[key] = bitmap
+        while (currentBytes() > maxBytes && entries.isNotEmpty()) {
+            val eldestKey = entries.keys.first()
+            val eldest = entries.remove(eldestKey)
+            if (eldest != null && !eldest.isRecycled) eldest.recycle()
+        }
     }
 
     @Synchronized
@@ -102,11 +103,9 @@ class BitmapCache(private val maxBytes: Int) {
     @Synchronized
     fun trim() {
         while (entries.size > 3) {
-            val it = entries.entries.iterator()
-            it.next()
-            val bmp = it.value
-            it.remove()
-            if (!bmp.isRecycled) bmp.recycle()
+            val key = entries.keys.first()
+            val bmp = entries.remove(key)
+            if (bmp != null && !bmp.isRecycled) bmp.recycle()
         }
     }
 }

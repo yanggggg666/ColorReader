@@ -5,28 +5,20 @@ import android.graphics.BitmapShader
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Shader
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.random.Random
@@ -57,6 +49,7 @@ internal object Grain {
  * edge. Stands in for a true backdrop blur (which Compose can only do by
  * snapshotting the whole hierarchy) at a fraction of the cost.
  */
+@Composable
 fun Modifier.glassPanel(
     shape: Shape,
     tint: Color,
@@ -65,44 +58,54 @@ fun Modifier.glassPanel(
     edgeWidth: Dp = 1.dp
 ): Modifier {
     val gAlpha = (grain * 255).toInt().coerceIn(0, 255)
+    // Density is read outside the DrawCache scope (it has no `density`).
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val scale = 1f / density.density
+    val edgeStroke = with(density) { edgeWidth.toPx() }
+    val grainPaint: Paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isFilterBitmap = false
+        shader = BitmapShader(
+            Grain.tile,
+            Shader.TileMode.REPEAT,
+            Shader.TileMode.REPEAT
+        ).apply {
+            setLocalMatrix(Matrix().apply { postScale(scale, scale) })
+        }
+        alpha = gAlpha
+    }
+    val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = with(density) { edgeWidth.toPx() }
+    }
+    @Suppress("unused")
+    val unusedContext = context
     return this
         .clip(shape)
         .background(tint)
         .drawWithCache {
-            val grainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                isFilterBitmap = false
-                shader = BitmapShader(
-                    Grain.tile,
-                    Shader.TileMode.REPEAT,
-                    Shader.TileMode.REPEAT
-                ).apply {
-                    val s = 1f / density.density
-                    setLocalMatrix(Matrix().apply { postScale(s, s) })
-                }
-                alpha = gAlpha
-            }
-            val strokeWidth = with(density) { edgeWidth.toPx() }
-            val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
-                strokeWidth = with(density) { edgeWidth.toPx() }
-            }
             onDrawBehind {
                 if (gAlpha > 0) {
                     drawIntoCanvas { c -> c.nativeCanvas.drawPaint(grainPaint) }
                 }
-                if (edge != null && strokeWidth > 0f) {
-                    when (val o = shape.createOutline(size, layoutDirection, this)) {
+                if (edge != null && edgeStroke > 0f) {
+                    val outline = shape.createOutline(size, layoutDirection, this)
+                    when (outline) {
                         is Outline.Generic -> drawIntoCanvas { c ->
-                            c.nativeCanvas.drawPath(o.path.asAndroidPath(), edgePaint)
+                            c.nativeCanvas.drawPath(outline.path.asAndroidPath(), edgePaint)
                         }
                         is Outline.Rounded -> drawIntoCanvas { c ->
+                            val r = outline.roundRect
                             c.nativeCanvas.drawRoundRect(
-                                o.left, o.top, o.right, o.bottom,
-                                o.cornerRadius.x, o.cornerRadius.y, edgePaint
+                                r.left, r.top, r.right, r.bottom,
+                                r.width / 8f, r.height / 8f, edgePaint
                             )
                         }
                         is Outline.Rectangle -> drawIntoCanvas { c ->
-                            c.nativeCanvas.drawRect(o.left, o.top, o.right, o.bottom, edgePaint)
+                            val rect = outline.rect
+                            c.nativeCanvas.drawRect(
+                                rect.left, rect.top, rect.right, rect.bottom, edgePaint
+                            )
                         }
                     }
                 }
@@ -124,62 +127,6 @@ fun Modifier.softShadow(
     spotColor = spotColor
 )
 
-/** Scale + dim driven by an externally supplied pressed state. */
-@Composable
-fun Modifier.pressScale(pressed: Boolean, minScale: Float = 0.96f): Modifier {
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) minScale else 1f,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
-        label = "pressScale"
-    )
-    val alpha by animateFloatAsState(
-        targetValue = if (pressed) 0.85f else 1f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
-        label = "pressAlpha"
-    )
-    return this.graphicsLayer(scaleX = scale, scaleY = scale, alpha = alpha)
-}
-
-/** Clickable with ColorOS press feedback and a proper accessibility role. */
-@Composable
-fun Modifier.tappable(
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    role: Role? = Role.Button,
-    minScale: Float = 0.96f,
-    onLongClick: (() -> Unit)? = null,
-    onLongClickLabel: String? = null
-): Modifier {
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    return Modifier
-        .pressScale(pressed, minScale)
-        .clickable(
-            interactionSource = interaction,
-            indication = null,
-            enabled = enabled,
-            role = role,
-            onLongClickLabel = onLongClickLabel,
-            onLongClick = onLongClick
-        ) { onClick() }
-}
-
-/** Vertical fade used at the top/bottom of scrolling shelves. */
-fun Modifier.verticalEdgeFade(edgeHeight: Dp, top: Boolean): Modifier = drawWithCache {
-    val h = with(density) { edgeHeight.toPx() }
-    val start = if (top) 0f else (size.height - h).coerceAtLeast(0f)
-    val brush = Brush.verticalGradient(
-        0f to Color.Transparent,
-        1f to Color.Black,
-        startY = start,
-        endY = start + h
-    )
-    onDrawWithContent {
-        drawContent()
-        drawRect(brush)
-    }
-}
-
 fun Color.lighten(amount: Float): Color = Color(
     red = red + (1f - red) * amount,
     green = green + (1f - green) * amount,
@@ -196,6 +143,6 @@ fun Color.darken(amount: Float): Color = Color(
 
 /** Returns a readable on-colour for [this]. */
 fun Color.contentColor(): Color {
-    val l = 0.2126f * red + 0.7152f * green + 0.0722f * blue
+    val l = 0.2126f * red + 0.7152f * green + 0.0722 * blue
     return if (l > 0.55f) Color(0xFF10131C) else Color.White
 }

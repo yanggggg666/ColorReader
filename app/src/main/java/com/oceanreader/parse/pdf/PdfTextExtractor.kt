@@ -1,5 +1,6 @@
 package com.oceanreader.parse.pdf
 
+import com.oceanreader.parse.Charsets
 import java.io.ByteArrayOutputStream
 import java.util.zip.Inflater
 
@@ -88,7 +89,7 @@ class PdfTextExtractor(private val file: java.io.File) {
 
     private fun findTrailer(bytes: ByteArray): PdfObj.Dict? {
         val tailStart = maxOf(0, bytes.size - 8192)
-        val tail = String(bytes, tailStart, bytes.size - tailStart, Charsets.ISO_8859_1)
+        val tail = String(bytes, tailStart, bytes.size - tailStart, Charsets.LATIN1)
         var idx = tail.lastIndexOf("trailer")
         while (idx >= 0) {
             val lx = Lexer(bytes, tailStart + idx + 7)
@@ -182,12 +183,12 @@ class PdfTextExtractor(private val file: java.io.File) {
 
     private fun fontOf(ref: PdfObj): Font {
         fontCache[ref]?.let { return it }
-        val font = Font(resolve(ref))
+        val font = Font(resolve(ref), this)
         fontCache[ref] = font
         return font
     }
 
-    private inner class Font(val obj: PdfObj) {
+    private class Font(val obj: PdfObj, val extractor: PdfTextExtractor) {
         val twoByte: Boolean
         val toUnicode = HashMap<Int, String>()
         val differences = HashMap<Int, String>()
@@ -199,20 +200,20 @@ class PdfTextExtractor(private val file: java.io.File) {
             val dict = obj as? PdfObj.Dict
             twoByte = dict?.name("Subtype") == "Type0"
             firstChar = dict?.int("FirstChar") ?: 0
-            val w = resolve(dict?.get("Widths"))
+            val w = extractor.resolve(dict?.get("Widths"))
             if (w is PdfObj.Arr) {
                 w.items.forEachIndexed { i, item ->
                     (item as? PdfObj.Num)?.let { widths[firstChar + i] = it.int }
                 }
             }
-            val descriptor = resolve(dict?.get("FontDescriptor")) as? PdfObj.Dict
+            val descriptor = extractor.resolve(dict?.get("FontDescriptor")) as? PdfObj.Dict
             descriptor?.int("MissingWidth")?.let { defaultWidth = it }
-            parseEncoding(resolve(dict?.get("Encoding")))
-            parseToUnicode(resolve(dict?.get("ToUnicode")))
+            parseEncoding(extractor.resolve(dict?.get("Encoding")))
+            parseToUnicode(extractor.resolve(dict?.get("ToUnicode")))
             if (toUnicode.isEmpty() && twoByte) {
-                val descendants = resolve(dict?.get("DescendantFonts"))
+                val descendants = extractor.resolve(dict?.get("DescendantFonts"))
                 (descendants as? PdfObj.Arr)?.items?.firstOrNull()?.let { d ->
-                    parseToUnicode(resolve((d as? PdfObj.Dict)?.get("ToUnicode")))
+                    parseToUnicode(extractor.resolve((d as? PdfObj.Dict)?.get("ToUnicode")))
                 }
             }
         }
@@ -224,7 +225,7 @@ class PdfTextExtractor(private val file: java.io.File) {
             }
             val dict = encoding as? PdfObj.Dict ?: return
             if (dict.name("BaseEncoding") == "WinAnsiEncoding") applyWinAnsi()
-            val diffs = resolve(dict["Differences"])
+            val diffs = extractor.resolve(dict["Differences"])
             if (diffs is PdfObj.Arr) {
                 var code = 0
                 for (item in diffs.items) {
@@ -247,9 +248,9 @@ class PdfTextExtractor(private val file: java.io.File) {
         }
 
         private fun parseToUnicode(ref: PdfObj?) {
-            val stream = resolve(ref) as? PdfObj.PdfStream ?: return
-            val data = decodeStream(stream) ?: return
-            parseCmap(String(data, Charsets.ISO_8859_1))
+            val stream = extractor.resolve(ref) as? PdfObj.PdfStream ?: return
+            val data = extractor.decodeStream(stream) ?: return
+            parseCmap(String(data, Charsets.LATIN1))
         }
 
         private fun parseCmap(text: String) {
@@ -346,25 +347,20 @@ class PdfTextExtractor(private val file: java.io.File) {
                 val sb = StringBuilder()
                 var i = 0
                 while (i + 4 <= hex.length) {
-                    hex.substring(i, i + 4).toIntOrNull(16)?.let { sb.append(codePoint(it)) }
+                    hex.substring(i, i + 4).toIntOrNull(16)?.let { sb.append(codePoint(it.toLong())) }
                     i += 4
                 }
                 if (sb.isEmpty() && hex.isNotEmpty()) {
                     for (j in 0 until hex.length step 2) {
-                        hex.substring(j, j + 2).toIntOrNull(16)?.let { sb.append(codePoint(it)) }
+                        hex.substring(j, j + 2).toIntOrNull(16)?.let { sb.append(codePoint(it.toLong())) }
                     }
                 }
                 return sb.toString()
             }
 
-            fun codePoint(v: Int): String = when {
-                v <= 0 -> ""
-                v < 0x10000 -> String(Character.toChars(v))
-                v < 0x110000 -> {
-                    val x = v - 0x10000
-                    String(Character.toChars(0xD800 + (x shr 10), 0xDC00 + (x and 0x3FF)))
-                }
-                else -> ""
+            fun codePoint(v: Long): String = StringBuilder().let { sb ->
+                sb.appendCodePointCompat(v)
+                sb.toString()
             }
         }
     }
@@ -423,12 +419,12 @@ class PdfTextExtractor(private val file: java.io.File) {
                 "Tf" -> {
                     val name = operands.lastOrNull { it is PdfObj.Name } as? PdfObj.Name
                     if (name != null) fonts[name.name]?.let { font = fontOf(it) }
-                    operands.lastOrNull { it is PdfObj.Num }?.let { fontSize = it.value.toFloat() }
+                    (operands.lastOrNull() as? PdfObj.Num)?.let { fontSize = it.value.toFloat() }
                     operands.clear()
                 }
-                "Tc" -> { operands.lastOrNull { it is PdfObj.Num }?.let { charSpacing = it.value.toFloat() }; operands.clear() }
-                "Tw" -> { operands.lastOrNull { it is PdfObj.Num }?.let { wordSpacing = it.value.toFloat() }; operands.clear() }
-                "TL" -> { operands.lastOrNull { it is PdfObj.Num }?.let { leading = it.value.toFloat() }; operands.clear() }
+                "Tc" -> { (operands.lastOrNull() as? PdfObj.Num)?.let { charSpacing = it.value.toFloat() }; operands.clear() }
+                "Tw" -> { (operands.lastOrNull() as? PdfObj.Num)?.let { wordSpacing = it.value.toFloat() }; operands.clear() }
+                "TL" -> { (operands.lastOrNull() as? PdfObj.Num)?.let { leading = it.value.toFloat() }; operands.clear() }
                 "Td", "TD" -> {
                     val nums = operands.filterIsInstance<PdfObj.Num>()
                     if (nums.size >= 2) {
@@ -786,7 +782,7 @@ class PdfTextExtractor(private val file: java.io.File) {
         fun readStreamIfPresent(dict: Map<String, PdfObj>): PdfObj.PdfStream? {
             val save = pos
             skipSpaces()
-            if (pos + 6 <= data.size && String(data, pos, 6, Charsets.ISO_8859_1) == "stream") {
+            if (pos + 6 <= data.size && String(data, pos, 6, Charsets.LATIN1) == "stream") {
                 pos += 6
                 if (pos < data.size && data[pos].toInt() == '\r'.code) pos++
                 if (pos < data.size && data[pos].toInt() == '\n'.code) pos++
@@ -827,14 +823,14 @@ class PdfTextExtractor(private val file: java.io.File) {
                 val c = data[pos].toInt() and 0xFF
                 if (isDigit(c) || c == '.'.code) pos++ else break
             }
-            val text = String(data, start, pos - start, Charsets.ISO_8859_1)
+            val text = String(data, start, pos - start, Charsets.LATIN1)
             val value = text.toDoubleOrNull() ?: 0.0
             val save = pos
             skipSpaces()
             if (pos < data.size && isDigit(data[pos].toInt() and 0xFF)) {
                 val genStart = pos
                 while (pos < data.size && isDigit(data[pos].toInt() and 0xFF)) pos++
-                val gen = String(data, genStart, pos - genStart, Charsets.ISO_8859_1).toIntOrNull() ?: 0
+                val gen = String(data, genStart, pos - genStart, Charsets.LATIN1).toIntOrNull() ?: 0
                 val after = pos
                 skipSpaces()
                 if (pos < data.size && data[pos].toInt() == 'R'.code.toByte().toInt() &&
@@ -863,7 +859,7 @@ class PdfTextExtractor(private val file: java.io.File) {
                 val c = data[pos].toInt() and 0xFF
                 if (isWhitespace(c) || isDelimiter(c)) break
                 if (c == '#'.code && pos + 2 < data.size) {
-                    val hex = String(data, pos + 1, 2, Charsets.ISO_8859_1)
+                    val hex = String(data, pos + 1, 2, Charsets.LATIN1)
                     sb.append(hex.toIntOrNull(16)?.toChar() ?: '#')
                     pos += 3
                     continue
@@ -881,7 +877,7 @@ class PdfTextExtractor(private val file: java.io.File) {
                 if (isWhitespace(c) || isDelimiter(c)) break
                 pos++
             }
-            return if (pos == start) { pos++; "" } else String(data, start, pos - start, Charsets.ISO_8859_1)
+            return if (pos == start) { pos++; "" } else String(data, start, pos - start, Charsets.LATIN1)
         }
 
         private fun readArray(): PdfObj {
@@ -1029,5 +1025,19 @@ class PdfTextExtractor(private val file: java.io.File) {
                         c == '['.code || c == ']'.code || c == '{'.code || c == '}'.code ||
                         c == '/'.code || c == '%'.code
         }
+    }
+}
+/** Appends a code point, splitting surrogates manually to avoid API quirks. */
+internal fun StringBuilder.appendCodePointCompat(v: Long) {
+    val cp = v.toInt()
+    when {
+        cp < 0 -> Unit
+        cp <= 0xFFFF -> append(cp.toChar())
+        cp <= 0x10FFFF -> {
+            val x = cp - 0x10000
+            append((0xD800 + (x shr 10)).toChar())
+            append((0xDC00 + (x and 0x3FF)).toChar())
+        }
+        else -> Unit
     }
 }

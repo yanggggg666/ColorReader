@@ -40,32 +40,34 @@ class SuperShape(
         if (r <= 0f) return Outline.Rectangle(Rect(0f, 0f, w, h))
 
         val n = if (exponent <= 0f) 2f else exponent
-        val p = (2.0 / n.toDouble()).coerceIn(0.2, 2.0)
+        val p = 2f / n
 
         val path = Path()
         val steps = 16
         path.moveTo(r, 0f)
         path.lineTo(w - r, 0f)
-        arc(path, w - r, r, r, p, PI / 2.0, 0.0, steps)
+        arc(path, w - r, r, r, p, PI_F / 2f, 0f, steps)
         path.lineTo(w, h - r)
-        arc(path, w - r, h - r, r, p, 0.0, -PI / 2.0, steps)
+        arc(path, w - r, h - r, r, p, 0f, -PI_F / 2f, steps)
         path.lineTo(r, h)
-        arc(path, r, h - r, r, p, -PI / 2.0, -PI, steps)
+        arc(path, r, h - r, r, p, -PI_F / 2f, -PI_F, steps)
         path.lineTo(0f, r)
-        arc(path, r, r, r, p, PI, PI / 2.0, steps)
+        arc(path, r, r, r, p, PI_F, PI_F / 2f, steps)
         path.close()
         return Outline.Generic(path)
     }
 }
+
+private const val PI_F: Float = Math.PI.toFloat()
 
 private fun arc(
     path: Path,
     cx: Float,
     cy: Float,
     r: Float,
-    p: Double,
-    fromRad: Double,
-    toRad: Double,
+    p: Float,
+    fromRad: Float,
+    toRad: Float,
     steps: Int
 ) {
     for (i in 1..steps) {
@@ -76,10 +78,10 @@ private fun arc(
     }
 }
 
-private fun signedPow(v: Double, p: Double): Double {
-    val a = abs(v)
-    val r = Math.pow(a, p)
-    return if (v < 0) -r else r
+private fun signedPow(v: Float, p: Float): Float {
+    val a = if (v < 0f) -v else v
+    val r = Math.pow(a.toDouble(), p.toDouble()).toFloat()
+    return if (v < 0f) -r else r
 }
 
 /** Icon / chip / avatar silhouette. */

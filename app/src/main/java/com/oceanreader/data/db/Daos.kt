@@ -68,6 +68,9 @@ interface BookDao {
 
     @Query("UPDATE books SET pinned = :pinned WHERE id = :id")
     suspend fun setPinned(id: String, pinned: Boolean)
+
+    @Query("UPDATE books SET title = :title, author = :author WHERE id = :id")
+    suspend fun updateMeta(id: String, title: String, author: String)
 }
 
 @Dao
@@ -87,6 +90,9 @@ interface HighlightDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(highlight: HighlightEntity)
+
+    @Query("UPDATE highlights SET note = :note WHERE id = :id")
+    suspend fun setNote(id: String, note: String)
 
     @Query("DELETE FROM highlights WHERE id = :id")
     suspend fun delete(id: String)
@@ -129,6 +135,9 @@ interface NoteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(note: NoteEntity)
 
+    @Query("UPDATE notes SET content = :content, updatedAt = :ts WHERE id = :id")
+    suspend fun update(id: String, content: String, ts: Long)
+
     @Query("DELETE FROM notes WHERE id = :id")
     suspend fun delete(id: String)
 
@@ -148,6 +157,9 @@ interface StatDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(day: ReadingDayEntity)
+
+    @Query("SELECT * FROM reading_days WHERE day = :day")
+    suspend fun day(day: String): ReadingDayEntity?
 
     @Query("SELECT IFNULL(SUM(millis), 0) FROM reading_days")
     fun observeTotalMillis(): Flow<Long>

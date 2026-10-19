@@ -1,6 +1,7 @@
 package com.oceanreader.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -90,7 +91,7 @@ fun AuroraIconButton(
         enabled = enabled,
         colors = IconButtonDefaults.filledIconButtonColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentContent = tint
+            contentColor = tint
         )
     ) {
         Icon(icon, contentDescription)

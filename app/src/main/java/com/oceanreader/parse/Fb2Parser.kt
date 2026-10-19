@@ -21,7 +21,7 @@ object Fb2Parser {
     private val IGNORE_TAGS = setOf("empty-line", "binary", "binary-content")
 
     fun parse(file: File, fallbackTitle: String): ParsedDoc {
-        val head = file.inputStream().use { ByteArray(4).also { s -> s.read(it) } }
+        val head = file.inputStream().use { s -> ByteArray(4).also { b -> s.read(b) } }
         val isZip = head.size > 2 && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte()
         return if (isZip) parseArchive(file, fallbackTitle) else parsePlain(file, fallbackTitle)
     }

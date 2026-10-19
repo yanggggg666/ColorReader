@@ -67,7 +67,7 @@ object MobiParser {
             var author = ""
             var coverOffset = 0
 
-            if (header.size >= 20 && String(header, 16, 4, Charsets.ISO_8859_1) == "MOBI") {
+            if (header.size >= 20 && String(header, 16, 4, Charsets.LATIN1) == "MOBI") {
                 encoding = encodingOf(u32(header, 28))
                 val fullNameOffset = u32(header, 72)
                 val fullNameLength = u32(header, 76)
@@ -233,7 +233,7 @@ object MobiParser {
         var i = coverOffset
         val limit = minOf(bytes.size, coverOffset + 8 * 1024 * 1024)
         while (i + 12 <= limit) {
-            if (String(bytes, i, 8, Charsets.ISO_8859_1) == "BOUNDARY") {
+            if (String(bytes, i, 8, Charsets.LATIN1) == "BOUNDARY") {
                 val len = u32(bytes, i + 8)
                 val begin = i + 12
                 if (len in 1..(limit - begin)) {
@@ -258,13 +258,27 @@ object MobiParser {
         return buf
     }
 
+    /** Fallback: scan records for the first plausible JPEG payload. */
+    private fun scanRecordsForImage(bytes: ByteArray, offsets: IntArray): ByteArray? {
+        for (i in 1 until offsets.size) {
+            val start = offsets[i]
+            if (start <= 0 || start + 3 >= bytes.size) continue
+            if (bytes[start] == 0xFF.toByte() && bytes[start + 1] == 0xD8.toByte()) {
+                val end = if (i + 1 < offsets.size) offsets[i + 1] else bytes.size
+                val payload = bytes.copyOfRange(start, end.coerceAtMost(bytes.size))
+                if (payload.size > 1024) return payload
+            }
+        }
+        return null
+    }
+
     private fun encodingOf(code: Int): java.nio.charset.Charset = when (code) {
         65001 -> Charsets.UTF_8
-        1252 -> Charsets.ISO_8859_1
+        1252 -> Charsets.LATIN1
         936 -> Charsets.GB18030
         950 -> Charsets.BIG5
-        932 -> Charsets.forName("Shift_JIS")
-        949 -> Charsets.forName("EUC-KR")
+        932 -> java.nio.charset.Charset.forName("Shift_JIS")
+        949 -> java.nio.charset.Charset.forName("EUC-KR")
         else -> Charsets.UTF_8
     }
 
@@ -313,16 +327,3 @@ internal class ByteBuf(initial: Int = 4096) {
     }
 }
 
-/** Convenience alias so the reader can stream large text to a StringBuilder. */
-internal fun bytesOf(stream: java.io.InputStream, limit: Int = MAX_TEXT): ByteArray {
-    val out = ByteArrayOutputStream()
-    val buf = ByteArray(32 * 1024)
-    var total = 0
-    while (total < limit) {
-        val n = stream.read(buf)
-        if (n <= 0) break
-        out.write(buf, 0, n)
-        total += n
-    }
-    return out.toByteArray()
-}

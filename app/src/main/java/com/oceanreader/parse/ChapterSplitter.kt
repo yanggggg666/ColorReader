@@ -112,11 +112,11 @@ object ChapterSplitter {
         val sorted = hits.sortedBy { it.offset }
         // Pre-chapter content becomes chapter 0 when it is substantial.
         if (sorted.first().offset > 400) {
-            out.add(ChapterRef(0, "开始", 0L, sorted.first().offset))
+            out.add(ChapterRef(0, "开始", 0L, sorted.first().offset.toLong()))
         }
         for ((i, hit) in sorted.withIndex()) {
-            val start = hit.offset
-            val end = if (i + 1 < sorted.size) sorted[i + 1].offset else total
+            val start = hit.offset.toLong()
+            val end = (if (i + 1 < sorted.size) sorted[i + 1].offset else total.toInt()).toLong()
             val len = (end - start).coerceAtLeast(0L)
             if (len <= 1) continue
             out.add(ChapterRef(out.size, hit.title, start, len))

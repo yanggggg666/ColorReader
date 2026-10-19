@@ -4,7 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.oceanreader.AppContainer
-import com.oceanreader.data.BookEntity
+import com.oceanreader.data.db.BookEntity
 import com.oceanreader.data.ImportResult
 import com.oceanreader.data.ImportStep
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,7 +66,7 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             settings.prefs.collect { p ->
                 _ui.value = _ui.value.copy(
-                    sortMode = p.sortMode,
+                    sortMode = p.shelfSort.ordinal,
                     gridColumns = p.gridColumns,
                     gridCover = p.showCoverGrid
                 )
@@ -126,11 +126,5 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
             ids.forEach { id -> repo.bookOnce(id)?.let { repo.setPinned(it, pinned) } }
             clearSelection()
         }
-    }
-
-    /** Opens the system file picker for the activity. */
-    fun openImportPicker(onPicked: (android.net.Uri) -> Unit) {
-        val activity = repo.appContext() as? com.oceanreader.MainActivity ?: return
-        activity.requestImport(onPicked)
     }
 }

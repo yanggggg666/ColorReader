@@ -30,7 +30,11 @@ object DocumentFactory {
     fun probe(file: File): FormatProbe {
         val byExtension = DocFormat.fromExtension(file.name)
         val head = try {
-            file.inputStream().use { ByteArray(2048).also { s -> s.read(it) } }
+            file.inputStream().use { input ->
+                val buf = ByteArray(2048)
+                val n = input.read(buf)
+                if (n > 0) buf.copyOf(n) else ByteArray(0)
+            }
         } catch (e: Exception) {
             ByteArray(0)
         }
@@ -53,7 +57,7 @@ object DocumentFactory {
                 return FormatProbe(DocFormat.UNKNOWN, "压缩包", false)
             }
         }
-        val text = String(head, Charsets.ISO_8859_1).trimStart()
+        val text = String(head, Charsets.LATIN1).trimStart()
         if (text.startsWith("{\\rtf")) return FormatProbe(DocFormat.RTF, "RTF", true)
         if (text.startsWith("<?xml") && (text.contains("FictionBook") || text.contains("<FictionBook"))) {
             return FormatProbe(DocFormat.FB2, "FictionBook", true)
@@ -65,8 +69,8 @@ object DocumentFactory {
             return FormatProbe(DocFormat.MOBI, "MOBI", true)
         }
         // A PalmDOC record list starts with "BOOK"/"TEXt" at offset 60.
-        if (head.size >= 64 && (String(head, 60, 4, Charsets.ISO_8859_1) == "BOOK" ||
-                String(head, 60, 4, Charsets.ISO_8859_1) == "TEXt")) {
+        if (head.size >= 64 && (String(head, 60, 4, Charsets.LATIN1) == "BOOK" ||
+                String(head, 60, 4, Charsets.LATIN1) == "TEXt")) {
             return FormatProbe(DocFormat.MOBI, "MOBI", true)
         }
         val fallback = byExtension ?: DocFormat.TXT

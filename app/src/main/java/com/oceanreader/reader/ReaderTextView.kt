@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.text.TextPaint
 import android.os.Build
 import android.text.Layout
 import android.text.Spannable
@@ -32,7 +33,9 @@ data class SpanSpec(
     /** 0 = background wash, 1 = underline. */
     val kind: Int = 0,
     /** TTS sentence highlight. */
-    val isSpeech: Boolean = false
+    val isSpeech: Boolean = false,
+    /** TTS word highlight. */
+    val isWord: Boolean = false
 )
 
 /** A selection range reported to the host. */
@@ -103,7 +106,7 @@ class ReaderTextView @JvmOverloads constructor(
 
     var onPageChanged: ((Int) -> Unit)? = null
     var onSelectionChanged: ((Selection?) -> Unit)? = null
-    var onTapInMargin: ((Boolean) -> Unit)? = null
+    var onTapInMargin: ((Boolean?) -> Unit)? = null
     var onLongPressAt: ((Int) -> Unit)? = null
 
     private var dragOffset = 0f
@@ -112,7 +115,7 @@ class ReaderTextView @JvmOverloads constructor(
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private val interpolator = DecelerateInterpolator()
 
-    private val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val bodyPaint = TextPaint(TextPaint.ANTI_ALIAS_FLAG).apply {
         color = textColor
         textSize = textSizePx
         typeface = fontFamily
@@ -227,16 +230,19 @@ class ReaderTextView @JvmOverloads constructor(
         spannable.append(buildStyledText(plainText))
         applyParagraphStyles()
 
+        // Layout.Alignment.JUSTIFY exists from API 26; minSdk is 24, so fall
+        // back to a plain left alignment on older devices.
+        val alignment: Layout.Alignment =
+            if (justifyText && android.os.Build.VERSION.SDK_INT >= 26) {
+                runCatching { Layout.Alignment.valueOf("JUSTIFY") }
+                    .getOrDefault(Layout.Alignment.ALIGN_NORMAL)
+            } else {
+                Layout.Alignment.ALIGN_NORMAL
+            }
+
         val builder = StaticLayout.Builder
             .obtain(spannable, 0, spannable.length, bodyPaint, availableWidth)
-            .setAlignment(
-                when {
-                    justifyText && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ->
-                        Layout.Alignment.JUSTIFY
-                    firstLineIndentChars <= 0 -> Layout.Alignment.ALIGN_NORMAL
-                    else -> Layout.Alignment.ALIGN_NORMAL
-                }
-            )
+            .setAlignment(alignment)
             .setLineSpacing(0f, lineSpacingMultiplier)
             .setIncludePad(false)
             .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
@@ -454,77 +460,6 @@ class ReaderTextView @JvmOverloads constructor(
 
     // -------------------------------------------------------------- touch
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        val l = layout
-        if (l == null || plainText.isEmpty()) return false
-
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                velocityTracker?.recycle()
-                velocityTracker = VelocityTracker.obtain()
-                velocityTracker?.addMovement(event)
-                dragging = true
-                dragOffset = 0f
-                return true
-            }
-
-            MotionEvent.ACTION_MOVE -> {
-                velocityTracker?.addMovement(event)
-                val delta = event.y - downY
-                if (abs(delta) > touchSlop || dragging) {
-                    dragOffset = delta
-                    invalidate()
-                }
-                if (selectionAnchor >= 0 && abs(delta) > touchSlop * 2) {
-                    // drag to extend the selection
-                    val offset = wordAt(event.x, downY) ?: return true
-                    selectionEnd = (offset + 1).coerceIn(0, plainText.length)
-                    applySpans()
-                }
-                return true
-            }
-
-            MotionEvent.ACTION_UP -> {
-                velocityTracker?.addMovement(event)
-                velocityTracker?.computeCurrentVelocity(1000)
-                val velocity = velocityTracker?.yVelocity ?: 0f
-                val delta = event.y - downY
-
-                if (abs(delta) > touchSlop) {
-                    settleTurn(delta, velocity)
-                } else if (selectionAnchor >= 0) {
-                    val offset = wordAt(event.x, event.y)
-                    if (offset != null && offset != selectionAnchor) {
-                        selectionEnd = (offset + 1).coerceIn(0, plainText.length)
-                        applySpans()
-                    } else {
-                        onSelectionChanged?.invoke(selection())
-                    }
-                } else {
-                    val third = width / 3f
-                    when {
-                        event.x < third -> onTapInMargin?.invoke(true)
-                        event.x > width - third -> onTapInMargin?.invoke(false)
-                        else -> onTapInMargin?.invoke(null)
-                    }
-                }
-                dragging = false
-                velocityTracker?.recycle()
-                velocityTracker = null
-                return true
-            }
-
-            MotionEvent.ACTION_CANCEL -> {
-                dragging = false
-                dragOffset = 0f
-                invalidate()
-                velocityTracker?.recycle()
-                velocityTracker = null
-                return true
-            }
-        }
-        return super.onTouchEvent(event)
-    }
 
     private var downY = 0f
 
