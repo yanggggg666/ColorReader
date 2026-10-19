@@ -384,7 +384,7 @@ class ReaderViewModel(
         lastSavedPage = s.pageIndex
         lastSavedOffset = pct
 
-        val offset = if (s.isPaged) 0L else lastPageOffset.toLong()
+        val offset = if (s.isPaged) 0 else lastPageOffset
         viewModelScope.launch {
             repo.saveProgress(
                 book = book,
