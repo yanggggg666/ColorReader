@@ -139,7 +139,8 @@ object MobiParser {
             chapters.add(ChapterRef(chapters.size, needle.take(80), pos.toLong(), (end - pos).toLong()))
             searchFrom = pos + needle.length
         }
-        return chapters.ifEmpty { ChapterSplitter.split(body) }
+        if (chapters.isEmpty()) return ChapterSplitter.split(body)
+        return ChapterSplitter.mergeUp(body, chapters)
     }
 
     // -------------------------------------------------------------- EXTH
