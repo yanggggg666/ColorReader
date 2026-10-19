@@ -117,6 +117,12 @@ object ReaderTypesetter {
     /**
      * Styles [text] in place (the returned value has exactly the same length).
      *
+     * A *paragraph* is a run of non-blank lines bounded by blank lines — never
+     * a single line. Wrapped lines inside a paragraph share one indent and one
+     * trailing block gap; treating each line as its own paragraph (as this did
+     * before) put a first-line indent and spacing after every wrap, which is
+     * what made pages look half empty.
+     *
      * @param chapterTitle title of the surrounding chapter; the first line is
      *   promoted to a chapter title when it matches it.
      */
@@ -128,54 +134,86 @@ object ReaderTypesetter {
         if (text.isEmpty() || style.fontSizePx <= 0f) return text
         val out = SpannableStringBuilder(text)
         val title = chapterTitle.trim()
+        val total = text.length
 
-        var cursor = 0
-        var firstContentLineSeen = false
-        var codeStart = -1
-        var codeEnd = -1
-
-        fun closeCode() {
-            if (codeStart >= 0 && codeEnd > codeStart) applyCode(out, codeStart, codeEnd, style)
-            codeStart = -1
-            codeEnd = -1
+        // Line boundaries: starts[i]..starts[i+1)-1, last line ends at total.
+        val lineStarts = ArrayList<Int>()
+        run {
+            var i = text.indexOf('\n')
+            var from = 0
+            while (i >= 0) {
+                lineStarts.add(from)
+                from = i + 1
+                i = text.indexOf('\n', from)
+            }
+            if (from < total || lineStarts.isEmpty()) lineStarts.add(from)
+        }
+        fun lineEndOf(index: Int): Int {
+            val next = lineStarts.getOrNull(index + 1) ?: return total
+            return (next - 1).coerceAtMost(total)
+        }
+        fun trimmedOf(index: Int): String {
+            val s = lineStarts[index]
+            val e = lineEndOf(index)
+            if (e <= s) return ""
+            return text.subSequence(s, e).toString().trim()
         }
 
-        while (cursor <= text.length) {
-            if (cursor == text.length) break
-            var lineEnd = -1
-            for (i in cursor until text.length) {
-                if (text[i] == '\n') { lineEnd = i; break }
+        var li = 0
+        var firstContentLineSeen = false
+        while (li < lineStarts.size) {
+            val lineStart = lineStarts[li]
+            val trimmed = trimmedOf(li)
+            if (trimmed.isEmpty()) {
+                li++
+                continue
             }
-            if (lineEnd < 0) lineEnd = text.length
-            val line = text.subSequence(cursor, lineEnd).toString()
-            val trimmed = line.trim()
+
+            // Code fence: gather the whole run of code-looking lines.
+            if (looksLikeCode(trimmed)) {
+                var lj = li
+                while (lj + 1 < lineStarts.size) {
+                    val next = trimmedOf(lj + 1)
+                    if (next.isEmpty() || !looksLikeCode(next)) break
+                    lj++
+                }
+                applyCode(out, lineStart, lineEndOf(lj), style)
+                li = lj + 1
+                firstContentLineSeen = true
+                continue
+            }
+
+            // Paragraph: gather every following line that is neither blank nor
+            // code, so a wrapped paragraph keeps a single indent and gap.
+            var lj = li
+            while (lj + 1 < lineStarts.size) {
+                val next = trimmedOf(lj + 1)
+                if (next.isEmpty() || looksLikeCode(next)) break
+                lj++
+            }
+            val runEnd = lineEndOf(lj)
+            val singleLine = (lj == li)
 
             when {
-                trimmed.isEmpty() -> closeCode()
+                !firstContentLineSeen && title.isNotEmpty() && trimmed == title ->
+                    applyChapterTitle(out, lineStart, runEnd, style)
 
-                looksLikeCode(trimmed) -> {
-                    if (codeStart < 0) codeStart = cursor
-                    codeEnd = lineEnd
+                headingLevel(trimmed) > 0 && singleLine ->
+                    applyHeading(out, lineStart, runEnd, style)
+
+                headingLevel(trimmed) > 0 -> {
+                    // A heading fused with its body (no blank line between the
+                    // two): style the first line, typeset the rest as prose.
+                    applyHeading(out, lineStart, lineEndOf(li), style)
+                    applyParagraph(out, lineStarts[li + 1], runEnd, lineEndOf(li + 1), style)
                 }
 
-                else -> {
-                    closeCode()
-                    when {
-                        !firstContentLineSeen && title.isNotEmpty() && trimmed == title ->
-                            applyChapterTitle(out, cursor, lineEnd, style)
-
-                        headingLevel(trimmed) > 0 ->
-                            applyHeading(out, cursor, lineEnd, style)
-
-                        else ->
-                            applyParagraph(out, cursor, lineEnd, style)
-                    }
-                    firstContentLineSeen = true
-                }
+                else ->
+                    applyParagraph(out, lineStart, runEnd, lineEndOf(li), style)
             }
-            cursor = lineEnd + 1
+            firstContentLineSeen = true
+            li = lj + 1
         }
-        closeCode()
         return out
     }
 
@@ -238,12 +276,23 @@ object ReaderTypesetter {
         )
     }
 
-    private fun applyParagraph(out: SpannableStringBuilder, start: Int, end: Int, style: ReaderStyle) {
+    /**
+     * @param firstLineEnd end of the paragraph's first line — the indent span
+     *   is confined to it, so a wrapped line never picks up an indent of its
+     *   own no matter how StaticLayout slices the span.
+     */
+    private fun applyParagraph(
+        out: SpannableStringBuilder,
+        start: Int,
+        end: Int,
+        firstLineEnd: Int,
+        style: ReaderStyle
+    ) {
         if (end <= start) return
-        if (style.indentPx > 0f) {
+        if (style.indentPx > 0f && firstLineEnd > start) {
             out.setSpan(
                 LeadingMarginSpan.Standard(style.indentPx.toInt(), 0),
-                start, end,
+                start, minOf(firstLineEnd, end),
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
             )
         }
