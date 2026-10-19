@@ -33,9 +33,17 @@ object ChapterSplitter {
         forceMarkdown: Boolean = false
     ): List<ChapterRef> {
         val explicit = scanExplicit(body, forceMarkdown)
-        if (explicit.size >= 2) return build(body, explicit)
+        // Even a single "第一章" is a real boundary; a whole-book txt usually
+        // carries exactly that one marker before the split heuristic runs.
+        if (explicit.isNotEmpty()) return build(body, explicit)
         val heuristic = scanHeuristic(body)
-        if (heuristic.size >= 3) return build(body, heuristic)
+        // Short standalone lines are only headings when they are sparse: a
+        // novel's one-line dialogue would otherwise turn every line into a
+        // chapter (one line per page).
+        val avgChars = if (heuristic.isEmpty()) 0f else body.length.toFloat() / heuristic.size
+        if (heuristic.size >= 3 && avgChars >= 400f) {
+            return build(body, heuristic, minChapterChars = 200)
+        }
         return slice(body, maxCharsPerChapter)
     }
 
@@ -106,7 +114,15 @@ object ChapterSplitter {
         return hits
     }
 
-    private fun build(body: String, hits: List<Hit>): List<ChapterRef> {
+    /**
+     * @param minChapterChars when > 0, headings with less body than this are
+     *   folded into the previous chapter instead of standing alone.
+     */
+    private fun build(
+        body: String,
+        hits: List<Hit>,
+        minChapterChars: Int = 0
+    ): List<ChapterRef> {
         val total = body.length.toLong()
         val out = ArrayList<ChapterRef>(hits.size)
         val sorted = hits.sortedBy { it.offset }
@@ -119,6 +135,13 @@ object ChapterSplitter {
             val end = (if (i + 1 < sorted.size) sorted[i + 1].offset else total.toInt()).toLong()
             val len = (end - start).coerceAtLeast(0L)
             if (len <= 1) continue
+            if (minChapterChars > 0 && len < minChapterChars && out.isNotEmpty()) {
+                // Too little body for a chapter of its own: extend the previous
+                // chapter over it (keeps the text, drops the fake heading).
+                val last = out.removeAt(out.size - 1)
+                out.add(last.copy(length = (start + len) - last.startOffset))
+                continue
+            }
             out.add(ChapterRef(out.size, hit.title, start, len))
         }
         return if (out.isEmpty()) listOf(ChapterRef(0, "全文", 0L, total)) else out
