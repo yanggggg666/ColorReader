@@ -34,8 +34,11 @@ class PdfDocument(
     override fun textOf(chapter: Int): String {
         val ref = chapters.getOrNull(chapter) ?: return ""
         val firstPage = ref.page.coerceAtLeast(0)
-        val pageStep = chapters.firstOrNull()?.let { 8 } ?: 8
-        val endPage = minOf(firstPage + pageStep, pageTexts.size)
+        // Chapter length is whatever the next chapter's start page says, so it
+        // never assumes a fixed group size.
+        val nextPage = chapters.getOrNull(chapter + 1)?.page ?: pageTexts.size
+        val endPage = minOf(nextPage, pageTexts.size)
+        if (firstPage >= endPage) return ""
         return pageTexts.subList(firstPage.coerceAtMost(pageTexts.size), endPage)
             .joinToString("\n\n")
     }
