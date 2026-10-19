@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.oceanreader.data.Settings
 import com.oceanreader.data.model.FontFamilyOption
+import kotlinx.coroutines.launch
 import com.oceanreader.reader.HighlightSpan
 import com.oceanreader.reader.ReaderPanel
 import com.oceanreader.reader.ReaderUiState
@@ -233,7 +235,8 @@ private fun ReaderSurface(
             textSize = style.fontSizePx
             color = style.textColor
             isFakeBoldText = style.bold
-            typeface = style.typeface
+            // `typeface` resolves to the outer preview value without `this`.
+            this.typeface = style.typeface
         }
     }
 

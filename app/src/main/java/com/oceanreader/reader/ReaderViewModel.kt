@@ -88,7 +88,7 @@ class ReaderViewModel(
     private var lastPageOffset = 0
     private var lastSavedChapter = -1
     private var lastSavedPage = -1
-    private var lastSavedOffset = -1L
+    private var lastSavedOffset = -1
 
     val prefs: StateFlow<com.oceanreader.data.Settings> = settings.prefs
         .stateIn(viewModelScope, SharingStarted.Eagerly, com.oceanreader.data.Settings())

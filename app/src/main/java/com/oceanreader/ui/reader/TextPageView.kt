@@ -158,7 +158,8 @@ fun TextPageView(
                     if (rangeEnd <= rangeStart) return
                     val paint = Paint().apply {
                         this.color = color
-                        style = Paint.Style.STROKE
+                        // `style` would resolve to the outer ReaderStyle val.
+                        this.style = Paint.Style.STROKE
                         strokeWidth = 2.5f
                         isAntiAlias = true
                     }
