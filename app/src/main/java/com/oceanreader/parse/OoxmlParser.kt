@@ -118,7 +118,12 @@ class OoxmlParser(private val file: File) {
 
             val core = readCore(zip)
             val text = body.toString().trim()
-            val chaptersFinal = if (chapters.isNotEmpty()) chapters else ChapterSplitter.split(text)
+            val chaptersFinal = if (chapters.isNotEmpty()) {
+                // Heading-based sections are often tiny; merge short ones.
+                ChapterSplitter.mergeUp(text, chapters)
+            } else {
+                ChapterSplitter.split(text)
+            }
 
             return ParsedDoc(
                 title = core.title.ifBlank { fallbackTitle },
