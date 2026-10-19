@@ -32,7 +32,7 @@ data class ReaderStyle(
     @ColorInt val sentenceColor: Int,
     @ColorInt val wordColor: Int,
     val typeface: Typeface? = null,
-    /** Extra space between paragraphs / after headings, in pixels. */
+    /** Extra space between paragraphs, in pixels (already em × font size). */
     val paragraphSpacingPx: Float = 0f,
     /** Structural hierarchy: 1.28x for headings, 1.5x for the chapter title. */
     val headingScale: Float = 1.28f,
@@ -198,12 +198,31 @@ object ReaderTypesetter {
 
     // ---------------------------------------------------------------- spans
 
+    /**
+     * Spacing is expressed in em (multiples of the body font size) the way
+     * WeRead's TypesetGlue / Readori's paragraphSpacing work, so the pitch
+     * stays balanced at every font size instead of inflating with density.
+     * These are the per-block factors multiplied by [ReaderStyle.paragraphSpacingEm].
+     */
+    private const val TITLE_SPACE_BEFORE_EM = 0.3f
+    private const val TITLE_SPACE_AFTER_EM = 1.2f
+    private const val HEADING_SPACE_BEFORE_EM = 0.3f
+    private const val HEADING_SPACE_AFTER_EM = 0.6f
+    private const val PARAGRAPH_SPACE_AFTER_EM = 1.0f
+    private const val CODE_SPACE_BEFORE_EM = 0.5f
+    private const val CODE_SPACE_AFTER_EM = 0.7f
+
     private fun applyChapterTitle(out: SpannableStringBuilder, start: Int, end: Int, style: ReaderStyle) {
         if (end <= start) return
         out.setSpan(RelativeSizeSpan(style.titleScale), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(StyleSpan(android.graphics.Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(ForegroundColorSpan(style.headingColor), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        blockSpacing(out, start, end, style, after = style.paragraphSpacingPx * 2.2f, before = style.paragraphSpacingPx * 0.6f)
+        val step = style.paragraphSpacingPx
+        blockSpacing(
+            out, start, end, style,
+            after = step * TITLE_SPACE_AFTER_EM,
+            before = step * TITLE_SPACE_BEFORE_EM
+        )
     }
 
     private fun applyHeading(out: SpannableStringBuilder, start: Int, end: Int, style: ReaderStyle) {
@@ -211,7 +230,12 @@ object ReaderTypesetter {
         out.setSpan(RelativeSizeSpan(style.headingScale), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(StyleSpan(android.graphics.Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(ForegroundColorSpan(style.headingColor), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        blockSpacing(out, start, end, style, after = style.paragraphSpacingPx * 1.6f, before = style.paragraphSpacingPx * 0.6f)
+        val step = style.paragraphSpacingPx
+        blockSpacing(
+            out, start, end, style,
+            after = step * HEADING_SPACE_AFTER_EM,
+            before = step * HEADING_SPACE_BEFORE_EM
+        )
     }
 
     private fun applyParagraph(out: SpannableStringBuilder, start: Int, end: Int, style: ReaderStyle) {
@@ -223,14 +247,21 @@ object ReaderTypesetter {
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
             )
         }
-        blockSpacing(out, start, end, style, after = style.paragraphSpacingPx, before = 0f)
+        // One block gap per paragraph — never before, so consecutive prose
+        // keeps a single, predictable pitch.
+        blockSpacing(out, start, end, style, after = style.paragraphSpacingPx * PARAGRAPH_SPACE_AFTER_EM, before = 0f)
     }
 
     private fun applyCode(out: SpannableStringBuilder, start: Int, end: Int, style: ReaderStyle) {
         if (end <= start) return
         out.setSpan(TypefaceSpan("monospace"), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(BackgroundColorSpan(style.codeBackground), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        blockSpacing(out, start, end, style, after = style.paragraphSpacingPx, before = style.paragraphSpacingPx * 0.5f)
+        val step = style.paragraphSpacingPx
+        blockSpacing(
+            out, start, end, style,
+            after = step * CODE_SPACE_AFTER_EM,
+            before = step * CODE_SPACE_BEFORE_EM
+        )
     }
 
     /**
