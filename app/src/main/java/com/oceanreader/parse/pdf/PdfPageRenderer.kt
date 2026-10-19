@@ -33,19 +33,14 @@ class PdfPageRenderer(file: File) {
     }
 
     /**
-     * Rasterises one page into a bitmap of exactly [width] x [height] pixels.
+     * Rasterises one page stretched to exactly [width] x [height] pixels.
      *
-     * With [cover] the page keeps its aspect ratio and fills the whole bitmap
-     * edge to edge (overflowing content is cropped) — that is what a phone
-     * reader expects from an image PDF: no letterbox bars. Without it the page
-     * is stretched to the bitmap, which distorts non-matching aspects.
+     * Callers that want full-bleed rendering pass a bitmap that already has
+     * the page's aspect ratio (see [pageAspect]) and crop on their side — the
+     * platform renderer only guarantees the "fill the whole bitmap" behaviour,
+     * and its destinationClip parameter rejects rects outside the bitmap.
      */
-    suspend fun render(
-        page: Int,
-        width: Int,
-        height: Int,
-        cover: Boolean = true
-    ): Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun render(page: Int, width: Int, height: Int): Bitmap? = withContext(Dispatchers.IO) {
         val r = renderer ?: return@withContext null
         if (page !in 0 until r.pageCount) return@withContext null
         try {
@@ -54,10 +49,9 @@ class PdfPageRenderer(file: File) {
                 val h = height.coerceAtLeast(1)
                 val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                 bitmap.eraseColor(Color.WHITE)
-                val dest = if (cover) coverRect(pdfPage.width, pdfPage.height, w, h) else null
                 pdfPage.render(
                     bitmap,
-                    dest,
+                    null,
                     null,
                     PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
                 )
@@ -65,28 +59,6 @@ class PdfPageRenderer(file: File) {
             }
         } catch (e: Throwable) {
             null
-        }
-    }
-
-    /**
-     * Destination rect (in bitmap pixels) that scales the page to cover the
-     * bitmap completely. May exceed the bitmap bounds; the renderer clips the
-     * overflow, which crops instead of distorting.
-     */
-    private fun coverRect(pageW: Int, pageH: Int, bitmapW: Int, bitmapH: Int): android.graphics.Rect? {
-        if (pageW <= 0 || pageH <= 0) return null
-        val pageAspect = pageW.toFloat() / pageH.toFloat()
-        val boxAspect = bitmapW.toFloat() / bitmapH.toFloat()
-        return if (pageAspect > boxAspect) {
-            // Page wider than the screen: match height, crop the sides.
-            val destW = bitmapH * pageAspect
-            val dx = ((destW - bitmapW) / 2f).toInt()
-            android.graphics.Rect(-dx, 0, (destW - dx).toInt(), bitmapH)
-        } else {
-            // Page taller than the screen: match width, crop top/bottom.
-            val destH = bitmapW / pageAspect
-            val dy = ((destH - bitmapH) / 2f).toInt()
-            android.graphics.Rect(0, -dy, bitmapW, (destH - dy).toInt())
         }
     }
 
