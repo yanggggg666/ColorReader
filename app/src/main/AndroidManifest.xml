@@ -45,28 +45,25 @@
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:mimeType="application/pdf" />
-                <data android:mimeType="application/epub+zip" />
-                <data android:mimeType="application/x-mobipocket-ebook" />
-                <data android:mimeType="application/vnd.ms-word.document.moebile" />
-                <data android:mimeType="application/msword" />
-                <data android:mimeType="text/*" />
-                <data android:mimeType="application/vnd.ms-word.document.macroEnabled.12" />
-                <data android:mimeType="application/xhtml+xml" />
-                <data android:mimeType="application/x-mobipocket-ebook" />
-                <data android:scheme="file" />
+                <data android:mimeType="*/*" />
                 <data android:scheme="content" />
+                <data android:scheme="file" />
             </intent-filter>
         </activity>
 
         <service
-            android:name=".tts.TtsService"
+            android:name=".tts.SpeechService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 

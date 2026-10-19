@@ -2,6 +2,7 @@ package com.oceanreader.data
 
 import android.content.Context
 import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 import com.oceanreader.data.db.AppDatabase
 import com.oceanreader.data.db.BookEntity
 import com.oceanreader.data.model.DocFormat
@@ -26,6 +27,18 @@ sealed class ImportResult {
     data class Failure(val fileName: String, val reason: String) : ImportResult()
 }
 
+/** Live progress of a multi-file (or whole-folder) import. */
+data class ImportProgress(
+    val total: Int = 0,
+    val completed: Int = 0,
+    val currentName: String = "",
+    val succeeded: Int = 0,
+    val failures: List<String> = emptyList()
+) {
+    val running: Boolean get() = total > 0 && completed < total
+    val finished: Boolean get() = total > 0 && completed >= total
+}
+
 /**
  * Copies user-picked files into app storage, sniffs the format, parses the
  * metadata and registers the book.
@@ -45,6 +58,10 @@ class BookImporter(
     private val cacheDir: File get() = File(context.cacheDir, "parse").apply { mkdirs() }
 
     suspend fun import(uri: Uri, onStep: (ImportStep) -> Unit = {}): ImportResult =
+        importOne(uri, onStep)
+
+    /** Imports one document. Callers that batch should use [importAll]. */
+    private suspend fun importOne(uri: Uri, onStep: (ImportStep) -> Unit = {}): ImportResult =
         withContext(Dispatchers.IO) {
             val resolver = context.contentResolver
             val displayName = displayNameOf(uri) ?: "未命名"
@@ -115,6 +132,83 @@ class BookImporter(
                 ImportResult.Failure(displayName, e.message ?: "导入失败")
             }
         }
+
+    /**
+     * Imports every picked file in sequence.
+     *
+     * One at a time on purpose: a parser holds the whole decoded body in
+     * memory, so running a folder of 50 novels in parallel would risk OOM.
+     * Failures never abort the batch — the progress report at the end lists
+     * what could not be imported.
+     */
+    suspend fun importAll(
+        uris: List<Uri>,
+        onProgress: (ImportProgress) -> Unit = {}
+    ): ImportProgress = withContext(Dispatchers.IO) {
+        if (uris.isEmpty()) return@withContext ImportProgress()
+        val failures = ArrayList<String>()
+        var succeeded = 0
+        onProgress(ImportProgress(total = uris.size))
+
+        uris.forEachIndexed { index, uri ->
+            val name = displayNameOf(uri) ?: uri.lastPathSegment ?: "未命名"
+            onProgress(
+                ImportProgress(
+                    total = uris.size,
+                    completed = index,
+                    currentName = name,
+                    succeeded = succeeded,
+                    failures = failures.toList()
+                )
+            )
+            val result = runCatching { importOne(uri) }
+                .getOrElse { e -> ImportResult.Failure(name, e.message ?: "导入失败") }
+            when (result) {
+                is ImportResult.Success -> succeeded++
+                is ImportResult.Failure -> failures.add("${result.fileName}: ${result.reason}")
+            }
+        }
+        ImportProgress(
+            total = uris.size,
+            completed = uris.size,
+            succeeded = succeeded,
+            failures = failures
+        )
+    }
+
+    /**
+     * Walks a picked folder (SAF tree) and returns every readable document
+     * inside it, at any depth, in a stable order.
+     */
+    fun documentsInTree(treeUri: Uri, limit: Int = 500): List<Uri> {
+        val root = DocumentFile.fromTreeUri(context, treeUri) ?: return emptyList()
+        val out = ArrayList<Uri>()
+        val stack = ArrayDeque<DocumentFile>()
+        stack.add(root)
+        var guard = 0
+        while (stack.isNotEmpty() && guard++ < 20_000) {
+            val node = stack.removeLast()
+            val children = runCatching { node.listFiles() }.getOrNull() ?: continue
+            for (child in children) {
+                if (out.size >= limit) break
+                if (child.isDirectory) {
+                    stack.add(child)
+                } else {
+                    val name = child.name ?: continue
+                    if (isSupportedName(name)) out.add(child.uri)
+                }
+            }
+            if (out.size >= limit) break
+        }
+        return out
+    }
+
+    /** True when the app has a parser for a file name. */
+    fun isSupportedName(name: String): Boolean {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (ext.isEmpty()) return false
+        return DocFormat.entries.any { ext in it.extensions }
+    }
 
     /** Re-runs metadata parsing, e.g. after a manual title edit. */
     suspend fun refresh(book: BookEntity): BookEntity = withContext(Dispatchers.IO) {

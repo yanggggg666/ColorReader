@@ -58,6 +58,16 @@ class BookRepository(
     suspend fun import(uri: Uri, onStep: (ImportStep) -> Unit = {}): ImportResult =
         importer.import(uri, onStep)
 
+    /** Batch import: many picked files at once, sequential and failure-tolerant. */
+    suspend fun importAll(uris: List<Uri>, onProgress: (ImportProgress) -> Unit = {}): ImportProgress =
+        importer.importAll(uris, onProgress)
+
+    /** Every supported document inside a picked SAF folder, at any depth. */
+    fun documentsInTree(treeUri: Uri): List<Uri> = importer.documentsInTree(treeUri)
+
+    /** Whether the app can parse a file by its name. */
+    fun supportsFile(name: String): Boolean = importer.isSupportedName(name)
+
     suspend fun refresh(book: BookEntity): BookEntity = importer.refresh(book)
 
     suspend fun delete(book: BookEntity, deleteFile: Boolean = true) =

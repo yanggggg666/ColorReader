@@ -39,24 +39,44 @@ fun ShelfScreen(
     onOpenBook: (String) -> Unit,
     onSettings: () -> Unit,
     onStats: () -> Unit = {},
-    onImportRequest: () -> Unit = {},
+    onImportFiles: () -> Unit = {},
+    onImportFolder: () -> Unit = {},
     vm: ShelfViewModel = viewModel()
 ) {
     val state by vm.ui.collectAsState()
     val context = LocalContext.current
+    val snackbarHost = remember { SnackbarHostState() }
+    var showImportSheet by remember { mutableStateOf(false) }
 
-    // The activity publishes picks here; only one listener is live at a time.
+    // The activity publishes picks here. Listeners must unregister, or every
+    // shelf composition that ever lived would also react to the next pick.
     DisposableEffect(vm) {
-        val listener: (android.net.Uri) -> Unit = { uri -> vm.import(uri) }
-        com.oceanreader.ImportBus.request(listener)
-        onDispose { }
+        val fileListener: (List<android.net.Uri>) -> Unit = { uris -> vm.importFiles(uris) }
+        val folderListener: (android.net.Uri) -> Unit = { uri -> vm.importFolder(uri) }
+        com.oceanreader.ImportBus.onFiles(fileListener)
+        com.oceanreader.ImportBus.onFolder(folderListener)
+        onDispose {
+            com.oceanreader.ImportBus.releaseFiles(fileListener)
+            com.oceanreader.ImportBus.releaseFolder(folderListener)
+        }
+    }
+
+    // One snackbar per finished batch, then the message is consumed.
+    LaunchedEffect(state.importResultMessage) {
+        val message = state.importResultMessage ?: return@LaunchedEffect
+        snackbarHost.showSnackbar(message)
+        vm.consumeImportResult()
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHost) },
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("我的书架", style = MaterialTheme.typography.headlineSmall) },
                 actions = {
+                    IconButton(onClick = onStats) {
+                        Icon(Icons.Default.BarChart, contentDescription = "阅读统计")
+                    }
                     IconButton(onClick = onSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
@@ -65,7 +85,7 @@ fun ShelfScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { onImportRequest.invoke() },
+                onClick = { showImportSheet = true },
                 containerColor = MaterialTheme.colorScheme.primary
             ) {
                 Icon(Icons.Default.Add, contentDescription = "导入书籍")
@@ -73,6 +93,16 @@ fun ShelfScreen(
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            // Batch import progress
+            if (state.importing) {
+                ImportProgressBanner(
+                    completed = state.importCompleted,
+                    total = state.importTotal,
+                    fileName = state.importFileName,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
             OutlinedTextField(
                 value = state.searchQuery,
                 onValueChange = vm::setSearch,
@@ -136,7 +166,105 @@ fun ShelfScreen(
                 }
             }
         }
+
+        // Import method chooser: files (multi-select) or a whole folder.
+        if (showImportSheet) {
+            ImportOptionsSheet(
+                onFiles = {
+                    showImportSheet = false
+                    onImportFiles()
+                },
+                onFolder = {
+                    showImportSheet = false
+                    onImportFolder()
+                },
+                onDismiss = { showImportSheet = false }
+            )
+        }
     }
+}
+
+/** Live progress of a batch import, pinned under the top bar. */
+@Composable
+private fun ImportProgressBanner(
+    completed: Int,
+    total: Int,
+    fileName: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = modifier
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Text(
+                text = if (total > 0) "正在导入 ${completed + 1} / $total" else "正在导入…",
+                style = MaterialTheme.typography.titleSmall
+            )
+            if (fileName.isNotBlank()) {
+                Text(
+                    text = fileName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            val fraction = if (total > 0) ((completed + 1f) / total).coerceIn(0f, 1f) else 0f
+            LinearProgressIndicator(
+                progress = { fraction },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+            )
+        }
+    }
+}
+
+/** Bottom sheet offering the two ways to add books to the shelf. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ImportOptionsSheet(
+    onFiles: () -> Unit,
+    onFolder: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.padding(bottom = 32.dp)) {
+            Text(
+                text = "导入书籍",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp)
+            )
+            ImportOptionRow(
+                icon = Icons.Default.InsertDriveFile,
+                title = "选择文件",
+                subtitle = "一次可多选：TXT / EPUB / PDF / MOBI / Word / MD / RTF / HTML / FB2",
+                onClick = onFiles
+            )
+            ImportOptionRow(
+                icon = Icons.Default.FolderOpen,
+                title = "选择文件夹",
+                subtitle = "自动扫描文件夹内所有可读的书籍（含子文件夹）",
+                onClick = onFolder
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImportOptionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(subtitle) },
+        leadingContent = { Icon(icon, contentDescription = null) },
+        modifier = Modifier.clickable(onClick = onClick)
+    )
 }
 
 @Composable

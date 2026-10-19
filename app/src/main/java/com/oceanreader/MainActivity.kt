@@ -1,5 +1,6 @@
 package com.oceanreader
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -30,14 +31,18 @@ import com.oceanreader.ui.theme.ColorReaderTheme
 /**
  * Single-activity shell.
  *
- * Only an Activity can start the system document picker, so the launcher is
- * created here and handed down as a plain lambda. Picked files are published
- * to [ImportBus] so the ViewModels stay free of framework types.
+ * Only an Activity can start the system document pickers, so the launchers
+ * are created here and handed down as plain lambdas. Picked files (single,
+ * multi-select or a whole folder tree) are published to [ImportBus] so the
+ * ViewModels stay free of framework types.
  */
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // "Share to" / "open with" may arrive before the shelf is composed;
+        // ImportBus buffers the pick until a listener registers.
+        handleDocumentIntent(intent)
         val container = AppContainer.from(applicationContext)
 
         setContent {
@@ -61,6 +66,48 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDocumentIntent(intent)
+    }
+
+    /** Turns a share/view intent into a batch import. */
+    private fun handleDocumentIntent(intent: Intent?) {
+        when (intent?.action) {
+            Intent.ACTION_SEND -> {
+                @Suppress("DEPRECATION")
+                val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM) ?: return
+                runCatching {
+                    contentResolver.takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+                ImportBus.publishFiles(listOf(uri))
+            }
+
+            Intent.ACTION_SEND_MULTIPLE -> {
+                @Suppress("DEPRECATION", "UNCHECKED_CAST")
+                val uris = intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+                    ?.filterNotNull()
+                    ?: return
+                uris.forEach { uri ->
+                    runCatching {
+                        contentResolver.takePersistableUriPermission(
+                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                    }
+                }
+                ImportBus.publishFiles(uris)
+            }
+
+            Intent.ACTION_VIEW -> {
+                val uri = intent.data ?: return
+                ImportBus.publishFiles(listOf(uri))
+            }
+        }
+    }
 }
 
 @Composable
@@ -68,16 +115,31 @@ private fun AppNavHost() {
     val navController = rememberNavController()
     val context = LocalContext.current
 
+    fun keepReadPermission(uri: Uri) {
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
+    }
+
+    // Single or multi-select: the picker returns every chosen document.
     val picker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            uris.forEach { keepReadPermission(it) }
+            ImportBus.publishFiles(uris)
+        }
+    }
+
+    // Folder pick: returns a tree URI; the importer walks it for documents.
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
         if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            }
-            ImportBus.publish(uri)
+            keepReadPermission(uri)
+            ImportBus.publishFolder(uri)
         }
     }
 
@@ -87,7 +149,8 @@ private fun AppNavHost() {
                 onOpenBook = { bookId -> navController.navigate("reader/$bookId") },
                 onSettings = { navController.navigate("settings") },
                 onStats = { navController.navigate("stats") },
-                onImportRequest = { picker.launch(arrayOf("*/*")) }
+                onImportFiles = { picker.launch(arrayOf("*/*")) },
+                onImportFolder = { folderPicker.launch(null) }
             )
         }
         composable(
@@ -111,15 +174,64 @@ private fun AppNavHost() {
     }
 }
 
-/** Broadcasts a picked Uri to the most recent subscriber. */
+/**
+ * Broadcasts picked documents to the most recent subscriber.
+ *
+ * Two channels because the shell hands the shelf either concrete files or a
+ * folder tree to walk. Picks that arrive before the shelf is composed (a cold
+ * start from "share to" or "open with") are buffered and delivered as soon as
+ * a listener registers. Listeners must [release] themselves when their screen
+ * leaves composition, otherwise every past composable would also react.
+ */
 object ImportBus {
-    private val listeners = ArrayDeque<(Uri) -> Unit>()
 
-    fun request(onPicked: (Uri) -> Unit) { listeners.addLast(onPicked) }
+    private val fileListeners = ArrayDeque<(List<Uri>) -> Unit>()
+    private val folderListeners = ArrayDeque<(Uri) -> Unit>()
+    private var bufferedFiles: List<Uri>? = null
+    private var bufferedFolder: Uri? = null
 
-    fun publish(uri: Uri) {
-        val pending = ArrayList(listeners)
-        listeners.clear()
-        pending.forEach { it.invoke(uri) }
+    fun onFiles(listener: (List<Uri>) -> Unit) {
+        fileListeners.addLast(listener)
+        bufferedFiles?.let { uris ->
+            bufferedFiles = null
+            listener.invoke(uris)
+        }
+    }
+
+    fun onFolder(listener: (Uri) -> Unit) {
+        folderListeners.addLast(listener)
+        bufferedFolder?.let { uri ->
+            bufferedFolder = null
+            listener.invoke(uri)
+        }
+    }
+
+    fun releaseFiles(listener: (List<Uri>) -> Unit) {
+        fileListeners.remove(listener)
+    }
+
+    fun releaseFolder(listener: (Uri) -> Unit) {
+        folderListeners.remove(listener)
+    }
+
+    fun publishFiles(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        if (fileListeners.isEmpty()) {
+            bufferedFiles = uris
+            return
+        }
+        val pending = ArrayList(fileListeners)
+        fileListeners.clear()
+        pending.forEach { it.invoke(uris) }
+    }
+
+    fun publishFolder(treeUri: Uri) {
+        if (folderListeners.isEmpty()) {
+            bufferedFolder = treeUri
+            return
+        }
+        val pending = ArrayList(folderListeners)
+        folderListeners.clear()
+        pending.forEach { it.invoke(treeUri) }
     }
 }
