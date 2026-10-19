@@ -120,6 +120,12 @@
 - 批量导入为顺序执行（单个文档解析需常驻内存，并发有 OOM 风险），实时显示进度（第 n/N 个 + 文件名），失败不影响其余文件，结束后 Snackbar 汇报成功/失败数量
 - 文件复制进应用私有目录（`files/books`），不依赖原文件持续存在
 
+### PDF 与短章节处理（参考微信读书 / 本机阅读 App 的逆向验证）
+- **PDF 全屏**：按页面宽高比渲染位图（填满屏幕的宽或高，另一边跟随页面比例，不变形），再在画布上居中并把溢出部分裁掉——平台 `PdfRenderer` 只保证“铺满整张位图”，且 `destinationClip` 不允许越界（否则抛 `IllegalArgumentException` 白屏）
+- **深色底色**：对 PDF 位图反色，夜间看扫描版不刺眼
+- **短章节合并**（`ChapterSplitter.mergeUp`）：EPUB 每个 spine 文件、DOCX 每个小标题段都可能只有几行，一章占一页即“一页几行”。合并阈值 1200 字，首章标题保留，字符偏移不受影响（进度/高亮/TTS 全部继续有效）。微信读书的做法是全书连续排版（章节只是流里的标题），合并是同一效果在“按章分页”架构下的等价实现
+- 微信读书 dex 实证：`TypesetSetting` + `TypesetCharSize`（字号）+ `TypesetGlue`（间距胶水）+ `textIndent` + `PageFactory`，与上面的块流架构一致
+
 ## 已知限制
 - PDF 扫描版无文本层时无法朗读（需 OCR）
 - MOBI HUFF/CDIC 压缩（类型 17480）暂不支持，建议用 Calibre 转换
