@@ -1,6 +1,6 @@
 package com.oceanreader.reader
 
-import android.graphics.FontMetricsInt
+import android.graphics.Paint.FontMetricsInt
 import android.graphics.Typeface
 import android.text.SpannableStringBuilder
 import android.text.Spanned
