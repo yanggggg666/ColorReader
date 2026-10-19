@@ -68,18 +68,19 @@ class BlockSpacingSpan(
 ) : LineHeightSpan {
 
     override fun chooseHeight(
-        text: CharSequence?,
+        text: CharSequence,
         start: Int,
         end: Int,
+        spanStartVertical: Int,
         lineHeight: Int,
         fm: FontMetricsInt
     ) {
         if (extraPx <= 0) return
+        // The layout derives the line height from ascent/descent (like the
+        // platform's LineHeightSpan.Standard does), so move those, not top/bottom.
         if (above) {
-            fm.top -= extraPx
             fm.ascent -= extraPx
         } else {
-            fm.bottom += extraPx
             fm.descent += extraPx
         }
     }
@@ -217,7 +218,7 @@ object ReaderTypesetter {
         if (end <= start) return
         if (style.indentPx > 0f) {
             out.setSpan(
-                LeadingMarginSpan.Stardard(style.indentPx.toInt(), 0),
+                LeadingMarginSpan.Standard(style.indentPx.toInt(), 0),
                 start, end,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
             )
