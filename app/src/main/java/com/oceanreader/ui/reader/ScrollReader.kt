@@ -58,7 +58,9 @@ fun ScrollReaderView(
     speechCursor: SpeechCursor,
     onNextChapter: () -> Unit,
     onProgress: (Float) -> Unit,
-    onLongPress: (Int) -> Unit = {}
+    onLongPress: (Int) -> Unit = {},
+    topInsetPx: Float = 0f,
+    bottomInsetPx: Float = 0f
 ) {
     var viewportHeight by remember { mutableStateOf(1f) }
     val scrollState = rememberScrollState()
@@ -157,7 +159,8 @@ fun ScrollReaderView(
                 .verticalScroll(scrollState)
                 .padding(
                     horizontal = with(LocalDensity.current) { style.marginHorizontalPx.toDp() },
-                    vertical = with(LocalDensity.current) { style.marginVerticalPx.toDp() }
+                    top = with(LocalDensity.current) { (style.marginVerticalPx + topInsetPx).toDp() },
+                    bottom = with(LocalDensity.current) { (style.marginVerticalPx + bottomInsetPx).toDp() }
                 )
         ) {
             Text(
