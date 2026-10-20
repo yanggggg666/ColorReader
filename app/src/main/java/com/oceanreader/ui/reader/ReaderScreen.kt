@@ -42,6 +42,7 @@ import com.oceanreader.data.Settings
 import com.oceanreader.data.model.FontFamilyOption
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.oceanreader.reader.ChapterAnnotator
 import com.oceanreader.reader.HighlightSpan
 import com.oceanreader.reader.ReaderPanel
 import com.oceanreader.reader.ReaderDiagnostics
@@ -50,8 +51,11 @@ import com.oceanreader.reader.ReaderTypesetter
 import com.oceanreader.reader.ReaderUiState
 import com.oceanreader.reader.ReaderViewModel
 import com.oceanreader.reader.TextPaginator
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextIndent
 import com.oceanreader.ui.components.AppSpacing
 import com.oceanreader.ui.components.AuroraIconButton
+import com.oceanreader.ui.components.SettingRow
 import com.oceanreader.ui.components.SheetHeader
 import com.oceanreader.ui.theme.LocalGlass
 import com.oceanreader.ui.theme.PagePalettesDark
@@ -247,6 +251,14 @@ private fun ReaderSurface(
         )
     }
 
+    // Live preview so typography changes are visible without closing the sheet.
+    val previewBlocks = remember(SAMPLE_PREVIEW, style) {
+        ReaderTypesetter.blocks(SAMPLE_PREVIEW, style, SAMPLE_PREVIEW_TITLE)
+    }
+    val previewAnnotated = remember(previewBlocks, style, prefs) {
+        ChapterAnnotator.annotate(SAMPLE_PREVIEW, previewBlocks, style, prefs)
+    }
+
     val paint = remember(style) {
         android.text.TextPaint().apply {
             isAntiAlias = true
@@ -284,10 +296,15 @@ private fun ReaderSurface(
         modifier = Modifier
             .fillMaxSize()
             .background(androidx.compose.ui.graphics.Color(style.backgroundColor))
-            .pointerInput(Unit) {
+            .pointerInput(prefs.scrollMode) {
                 // Mainstream tap zones: left/right quarter turns the page,
-                // the middle band toggles the immersive chrome.
+                // the middle band toggles the immersive chrome. In scroll
+                // mode every tap toggles the chrome — swipes do the paging.
                 detectTapGestures { offset ->
+                    if (prefs.scrollMode) {
+                        onTap()
+                        return@detectTapGestures
+                    }
                     val w = size.width.toFloat().coerceAtLeast(1f)
                     when {
                         offset.x < w * 0.25f -> vm.previousPage()
@@ -385,6 +402,20 @@ private fun ReaderSurface(
                 pageCount = state.pageCount,
                 dark = dark,
                 onPageChanged = { page -> vm.onPageRendered(page, 0) }
+            )
+        } else if (prefs.scrollMode) {
+            // WeRead-style continuous scrolling; long-press selection and TTS
+            // follow are handled by the surrounding chrome and SpeechController.
+            ScrollReaderView(
+                chapterText = state.chapterText,
+                chapterTitle = state.chapterTitle,
+                chapterIndex = state.chapterIndex,
+                chapterCount = state.chapters.size,
+                style = style,
+                prefs = prefs,
+                speechCursor = speechCursor,
+                onNextChapter = vm::nextChapter,
+                onProgress = vm::onScrollProgress
             )
         } else {
             TextPageView(
@@ -684,6 +715,42 @@ private fun AppearancePanel(vm: ReaderViewModel) {
             .padding(bottom = 24.dp)
     ) {
         SheetHeader(title = "排版", subtitle = "字号、行距、边距与页面底色即时生效")
+
+        // ---- live preview of the current typography -------------------------
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.sm),
+            color = palette?.background ?: scheme.background,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text(
+                text = previewAnnotated,
+                style = TextStyle(
+                    fontSize = ChapterAnnotator.fontSizeSp(prefs).sp,
+                    lineHeight = ChapterAnnotator.lineHeightSp(style, prefs),
+                    fontFamily = ChapterAnnotator.fontFamilyOf(prefs.fontFamily),
+                    color = palette?.text ?: scheme.onBackground,
+                    textIndent = TextIndent(
+                        firstLine = ChapterAnnotator.indentSp(prefs),
+                        restLine = 0.sp
+                    )
+                ),
+                modifier = Modifier.padding(AppSpacing.md)
+            )
+        }
+
+        // ---- reading mode ----------------------------------------------------
+        SettingRow(
+            title = "上下滚动阅读",
+            subtitle = if (prefs.scrollMode) "已开启：连续滑动，章末可点下一章" else "已关闭：传统左右翻页",
+            trailing = {
+                Switch(
+                    checked = prefs.scrollMode,
+                    onCheckedChange = { v -> vm.setFont { store -> store.setScrollMode(v) } }
+                )
+            }
+        )
 
         // Font family
         Row(
@@ -1119,3 +1186,7 @@ private fun NotesPanel(state: ReaderUiState, vm: ReaderViewModel) {
         Spacer(Modifier.height(AppSpacing.lg))
     }
 }
+
+/** Sample text for the live typesetting preview inside 排版. */
+private const val SAMPLE_PREVIEW_TITLE = "第一章 夜色"
+private const val SAMPLE_PREVIEW = "第一章 夜色\n\n夜色像潮水一样漫上来，把整座城市泡得发软。他站在窗前，\n手里捏着那张薄薄的纸片，纸片边缘已经被汗浸得发皱。\n\n路灯一盏盏亮起来，橙黄色的光落在纸片上，把那行小字照得格外清楚。\n\n他忽然想起很多年前，也有人这样站在这里，对他说：会好的。"
