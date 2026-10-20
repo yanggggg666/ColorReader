@@ -578,6 +578,17 @@ class ReaderViewModel(
         AppContainer.from(getApplication()).startSpeechService()
     }
 
+    /** Long-press "read from here": starts TTS at an offset inside the chapter. */
+    fun startSpeakingFrom(offsetInChapter: Int) {
+        val s = _ui.value
+        if (s.isPaged) {
+            speech.playFrom(s.chapterIndex, 0)
+        } else {
+            speech.playFrom(s.chapterIndex, offsetInChapter.coerceIn(0, s.chapterText.length))
+        }
+        AppContainer.from(getApplication()).startSpeechService()
+    }
+
     fun stopSpeaking() {
         speech.stop()
     }
