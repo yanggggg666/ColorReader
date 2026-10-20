@@ -261,6 +261,28 @@ fun SettingsScreen(
             SectionHeader("书架")
 
             SettingRow(
+                title = "上下滚动阅读",
+                subtitle = if (prefs.scrollMode) "连续滑动阅读（章末有点击下一章）" else "传统翻页",
+                trailing = {
+                    Switch(
+                        checked = prefs.scrollMode,
+                        onCheckedChange = { write { settings.setScrollMode(it) } }
+                    )
+                }
+            )
+
+            SettingRow(
+                title = "简洁主题",
+                subtitle = if (prefs.minimalTheme) "纯色顶栏、无渐变装饰（默认）" else "ColorOS 极光风格",
+                trailing = {
+                    Switch(
+                        checked = prefs.minimalTheme,
+                        onCheckedChange = { write { settings.setMinimalTheme(it) } }
+                    )
+                }
+            )
+
+            SettingRow(
                 title = "排序方式",
                 subtitle = prefs.shelfSort.label,
                 trailing = {
