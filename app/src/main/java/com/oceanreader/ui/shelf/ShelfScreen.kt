@@ -98,6 +98,7 @@ fun ShelfScreen(
                 bookCount = state.books.size,
                 onStats = onStats,
                 onSettings = onSettings,
+                minimalTheme = state.minimalTheme,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -256,13 +257,14 @@ fun ShelfScreen(
 
 /**
  * Shelf hero header: large title, book count and the two secondary
- * destinations (stats and settings) on the aurora gradient.
+ * destinations. "简洁主题" drops the aurora gradient for a plain surface.
  */
 @Composable
 private fun ShelfHeader(
     bookCount: Int,
     onStats: () -> Unit,
     onSettings: () -> Unit,
+    minimalTheme: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val accent = LocalAccent.current
@@ -270,7 +272,10 @@ private fun ShelfHeader(
 
     Box(
         modifier = modifier
-            .background(auroraBrush(dark, accent))
+            .background(
+                if (minimalTheme) MaterialTheme.colorScheme.background
+                else auroraBrush(dark, accent)
+            )
             .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.md)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
