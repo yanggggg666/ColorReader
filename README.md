@@ -1,6 +1,6 @@
 # 潮阅 (OceanReader)
 
-> 当前版本 **v1.1.4**（versionCode 6）· Debug 签名，同签名可直接覆盖安装
+> 当前版本 **v1.1.5**（versionCode 7）· Debug 签名，同签名可直接覆盖安装
 
 ### 签名与覆盖安装
 每次 CI 运行都是全新虚拟机，AGP 默认会现场生成**随机** debug 密钥——每版签名不同就没法覆盖安装。现在用仓库内固定密钥 `keystore/debug.keystore`（CI 缺失时自动生成并提交回仓库，本地Clone后由 `build.gradle.kts` 兜底生成），所有构建同一签名，可直接覆盖升级、保留数据。debug 密钥密码是公开的 `android`，仅用于测试分发，可随时弃用重置。
