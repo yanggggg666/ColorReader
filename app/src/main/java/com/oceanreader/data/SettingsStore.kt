@@ -49,7 +49,14 @@ data class Settings(
     val shelfSort: ShelfSort = ShelfSort.RECENT,
     val showCoverGrid: Boolean = true,
     val gridColumns: Int = 0,
-    val immersiveHint: Boolean = true
+    val immersiveHint: Boolean = true,
+    /** Continuous vertical scrolling (WeRead-style) instead of page turns. */
+    val scrollMode: Boolean = true,
+    /**
+     * Clean, plain Material look (no aurora hero, no glass chrome) for
+     * readers who want a "normal" app appearance.
+     */
+    val minimalTheme: Boolean = true
 )
 
 /** Global, app-wide preferences. Per-book overrides live in Room. */
@@ -83,6 +90,8 @@ class SettingsStore(private val context: Context) {
         val SORT_MODE = stringPreferencesKey("sort_mode")
         val GRID_COLUMNS = intPreferencesKey("grid_columns")
         val SHOW_COVER_GRID = booleanPreferencesKey("show_cover_grid")
+        val SCROLL_MODE = booleanPreferencesKey("scroll_mode")
+        val MINIMAL_THEME = booleanPreferencesKey("minimal_theme")
     }
 
     /** Emits the full resolved preference snapshot. */
@@ -119,7 +128,9 @@ class SettingsStore(private val context: Context) {
                 .getOrDefault(ShelfSort.RECENT),
             showCoverGrid = p[Keys.SHOW_COVER_GRID] ?: true,
             gridColumns = p[Keys.GRID_COLUMNS] ?: 0,
-            immersiveHint = true
+            immersiveHint = true,
+            scrollMode = p[Keys.SCROLL_MODE] ?: true,
+            minimalTheme = p[Keys.MINIMAL_THEME] ?: true
         )
     }
 
@@ -151,6 +162,8 @@ class SettingsStore(private val context: Context) {
     suspend fun setShelfSort(v: ShelfSort) = put(Keys.SORT_MODE, v.name)
     suspend fun setGridColumns(v: Int) = put(Keys.GRID_COLUMNS, v.coerceIn(0, 5))
     suspend fun setShowCoverGrid(v: Boolean) = put(Keys.SHOW_COVER_GRID, v)
+    suspend fun setScrollMode(v: Boolean) = put(Keys.SCROLL_MODE, v)
+    suspend fun setMinimalTheme(v: Boolean) = put(Keys.MINIMAL_THEME, v)
 
     private suspend fun <T> put(key: Preferences.Key<T>, value: T) {
         context.dataStore.edit { it[key] = value }
