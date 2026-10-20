@@ -129,25 +129,23 @@ fun ScrollReaderView(
         )
     }
 
-    // Long-press -> character offset, mapped through stable layout APIs only
-    // (getLineForVertical + getHorizontalPosition), so no experimental API.
+    // Long-press -> character offset. TextLayoutResult only guarantees
+    // getBoundingBox, so the line is found by binary search on character
+    // boxes (the sentence expander upstream then snaps to sentence bounds).
     fun offsetAt(position: Offset): Int? {
         val textLayout = layout ?: return null
-        if (position.y < 0f || position.y > textLayout.size.height.toFloat()) return null
-        val line = textLayout.getLineForVertical(position.y.toInt().coerceIn(0, textLayout.size.height))
-        if (line !in 0 until textLayout.lineCount) return null
-        val lineStart = textLayout.getLineStart(line)
-        val lineEnd = textLayout.getLineEnd(line)
-        var best = lineStart
-        var bestDistance = Float.MAX_VALUE
-        for (i in lineStart until lineEnd) {
-            val distance = abs(textLayout.getHorizontalPosition(i, false) - position.x)
-            if (distance < bestDistance) {
-                bestDistance = distance
-                best = i
-            }
+        val n = baseAnnotated.length
+        if (n == 0) return null
+        val y = position.y.toInt()
+        if (y < 0) return 0
+        var lo = 0
+        var hi = n
+        while (lo < hi) {
+            val mid = (lo + hi) / 2
+            val boxTop = textLayout.getBoundingBox(mid).top
+            if (boxTop <= y) lo = mid + 1 else hi = mid
         }
-        return best
+        return (lo - 1).coerceIn(0, n - 1)
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
