@@ -86,6 +86,7 @@ class ReaderViewModel(
     private var statJob: Job? = null
     private var flowPageCount = 0
     private var lastPageOffset = 0
+    private var lastScrollPercent = 0f
     private var lastSavedChapter = -1
     private var lastSavedPage = -1
     private var lastSavedOffset = -1
@@ -352,6 +353,29 @@ class ReaderViewModel(
         flowPageCount = pageCount.coerceAtLeast(1)
         val clampedIndex = if (s.pageIndex >= flowPageCount) flowPageCount - 1 else s.pageIndex
         _ui.value = s.copy(pageIndex = clampedIndex, flowPages = flowPageCount)
+    }
+
+    /** Continuous-scroll progress: persisting the fraction for the chapter. */
+    fun onScrollProgress(fraction: Float) {
+        val s = _ui.value
+        if (s.isPaged) return
+        lastScrollPercent = fraction.coerceIn(0f, 1f)
+        _ui.value = s.copy(percent = lastScrollPercent * bookPercentScale(s))
+        viewModelScope.launch {
+            saveProgress(
+                book = s.book ?: return@launch,
+                chapter = s.chapterIndex,
+                offset = 0,
+                page = s.pageIndex,
+                percent = _ui.value.percent
+            )
+        }
+    }
+
+    private fun bookPercentScale(s: ReaderUiState): Float {
+        val ref = s.chapters.getOrNull(s.chapterIndex) ?: return 0f
+        val total = s.book?.totalChars?.coerceAtLeast(1L) ?: return 0f
+        return (ref.length.toFloat() / total).coerceIn(0f, 1f)
     }
 
     /** Called by the text renderer whenever the visible page changes. */
