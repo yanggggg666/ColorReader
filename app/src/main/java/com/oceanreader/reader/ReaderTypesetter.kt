@@ -135,6 +135,7 @@ object ReaderTypesetter {
         val out = SpannableStringBuilder(text)
         val title = chapterTitle.trim()
         val total = text.length
+        val blockCounts = HashMap<BlockKind, Int>()
 
         // Line boundaries: starts[i]..starts[i+1)-1, last line ends at total.
         val lineStarts = ArrayList<Int>()
@@ -178,6 +179,7 @@ object ReaderTypesetter {
                     lj++
                 }
                 applyCode(out, lineStart, lineEndOf(lj), style)
+                blockCounts[BlockKind.CODE] = (blockCounts[BlockKind.CODE] ?: 0) + 1
                 li = lj + 1
                 firstContentLineSeen = true
                 continue
@@ -195,27 +197,40 @@ object ReaderTypesetter {
             val singleLine = (lj == li)
 
             when {
-                !firstContentLineSeen && title.isNotEmpty() && trimmed == title ->
+                !firstContentLineSeen && title.isNotEmpty() && trimmed == title -> {
                     applyChapterTitle(out, lineStart, runEnd, style)
+                    blockCounts[BlockKind.TITLE] = (blockCounts[BlockKind.TITLE] ?: 0) + 1
+                }
 
-                headingLevel(trimmed) > 0 && singleLine ->
+                headingLevel(trimmed) > 0 && singleLine -> {
                     applyHeading(out, lineStart, runEnd, style)
+                    blockCounts[BlockKind.HEADING] = (blockCounts[BlockKind.HEADING] ?: 0) + 1
+                }
 
                 headingLevel(trimmed) > 0 -> {
                     // A heading fused with its body (no blank line between the
                     // two): style the first line, typeset the rest as prose.
                     applyHeading(out, lineStart, lineEndOf(li), style)
                     applyParagraph(out, lineStarts[li + 1], runEnd, lineEndOf(li + 1), style)
+                    blockCounts[BlockKind.HEADING] = (blockCounts[BlockKind.HEADING] ?: 0) + 1
+                    blockCounts[BlockKind.PARAGRAPH] = (blockCounts[BlockKind.PARAGRAPH] ?: 0) + 1
                 }
 
-                else ->
+                else -> {
                     applyParagraph(out, lineStart, runEnd, lineEndOf(li), style)
+                    blockCounts[BlockKind.PARAGRAPH] = (blockCounts[BlockKind.PARAGRAPH] ?: 0) + 1
+                }
             }
             firstContentLineSeen = true
             li = lj + 1
         }
+        lastBlockCounts = blockCounts
         return out
     }
+
+    /** Block census of the last [layout] call, for diagnostics. */
+    var lastBlockCounts: Map<BlockKind, Int> = emptyMap()
+        private set
 
     /** True when a line reads like code rather than prose. */
     fun looksLikeCode(trimmedLine: String): Boolean {
