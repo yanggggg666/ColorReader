@@ -89,6 +89,16 @@ object ReaderDiagnostics {
         )
     }
 
+    /**
+     * Raw line heights of the first lines of the layout — after removing the
+     * custom spacing span these must all equal the natural pitch
+     * (fontSize × lineSpacing multiplier), which proves no span is inflating
+     * the vertical rhythm.
+     */
+    fun lineHeights(heights: List<Int>) {
+        append("LINEHEIGHTS=${heights}")
+    }
+
     /** Anything that goes wrong while reading, tagged for easy grep. */
     fun error(where: String, detail: String) {
         Log.e(TAG, "ERROR at $where: $detail")
