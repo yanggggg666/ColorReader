@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Which panel is open on top of the reading surface. */
-enum class ReaderPanel { NONE, TOC, APPEARANCE, SPEECH, SEARCH, BOOKMARK, NOTES }
+enum class ReaderPanel { NONE, TOC, APPEARANCE, SPEECH, SEARCH, BOOKMARK, NOTES, DIAGNOSTICS }
 
 /** Everything the reading screen renders from. */
 data class ReaderUiState(
