@@ -168,6 +168,7 @@ fun ReaderScreen(
                 onHighlight = { vm.highlightSelection() },
                 onUnderline = { vm.highlightSelection(underline = true) },
                 onNote = { vm.setPanel(ReaderPanel.NOTES) },
+                onSpeak = { vm.startSpeakingFrom(state.selectionStart) },
                 onCopy = {
                     clipboard.setText(AnnotatedString(state.selection))
                     vm.clearSelection()
@@ -407,7 +408,8 @@ private fun ReaderSurface(
                 prefs = prefs,
                 speechCursor = speechCursor,
                 onNextChapter = vm::nextChapter,
-                onProgress = vm::onScrollProgress
+                onProgress = vm::onScrollProgress,
+                onLongPress = { offset -> vm.onLongPressAt(offset) }
             )
         } else {
             TextPageView(
@@ -611,6 +613,7 @@ private fun SelectionToolbar(
     onHighlight: () -> Unit,
     onUnderline: () -> Unit,
     onNote: () -> Unit,
+    onSpeak: () -> Unit,
     onCopy: () -> Unit,
     onClear: () -> Unit,
     modifier: Modifier = Modifier
@@ -628,7 +631,7 @@ private fun SelectionToolbar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text.take(20),
+                text.take(12),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -637,6 +640,7 @@ private fun SelectionToolbar(
             AuroraIconButton(Icons.Default.FormatColorFill, "高亮", onHighlight)
             AuroraIconButton(Icons.Default.FormatUnderlined, "下划线", onUnderline)
             AuroraIconButton(Icons.Default.Note, "笔记", onNote)
+            AuroraIconButton(Icons.Default.RecordVoiceOver, "从此处开始朗读", onSpeak)
             AuroraIconButton(Icons.Default.ContentCopy, "复制", onCopy)
             AuroraIconButton(Icons.Default.Close, "取消", onClear)
         }
