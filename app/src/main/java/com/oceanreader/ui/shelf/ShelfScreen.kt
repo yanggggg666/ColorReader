@@ -269,13 +269,13 @@ private fun ShelfHeader(
 ) {
     val accent = LocalAccent.current
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val headerBackground: Modifier =
+        if (minimalTheme) Modifier.background(MaterialTheme.colorScheme.background)
+        else Modifier.background(auroraBrush(dark, accent))
 
     Box(
         modifier = modifier
-            .background(
-                if (minimalTheme) MaterialTheme.colorScheme.background
-                else auroraBrush(dark, accent)
-            )
+            .then(headerBackground)
             .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.md)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
