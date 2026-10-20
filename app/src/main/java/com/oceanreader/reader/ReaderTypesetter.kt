@@ -54,6 +54,13 @@ enum class BlockKind {
     CODE
 }
 
+/** One recognised block: its kind and its character range in the chapter. */
+data class TypedBlock(
+    val kind: BlockKind,
+    val start: Int,
+    val end: Int
+)
+
 /**
  * Paragraph separation is deliberately *not* a custom span.
  *
@@ -114,11 +121,32 @@ object ReaderTypesetter {
     ): CharSequence {
         if (text.isEmpty() || style.fontSizePx <= 0f) return text
         val out = SpannableStringBuilder(text)
+        for (block in blocks(text, style, chapterTitle)) {
+            when (block.kind) {
+                BlockKind.TITLE -> applyChapterTitle(out, block.start, block.end, style)
+                BlockKind.HEADING -> applyHeading(out, block.start, block.end, style)
+                BlockKind.PARAGRAPH -> applyParagraph(out, block.start, block.end, block.end, style)
+                BlockKind.CODE -> applyCode(out, block.start, block.end, style)
+            }
+        }
+        return out
+    }
+
+    /**
+     * Splits [text] into typed blocks (paragraph = a run of non-blank lines).
+     * Shared by the span-based page renderer and the Compose scroll renderer,
+     * so both see identical structure.
+     */
+    fun blocks(
+        text: CharSequence,
+        style: ReaderStyle,
+        chapterTitle: String = ""
+    ): List<TypedBlock> {
+        if (text.isEmpty()) return emptyList()
         val title = chapterTitle.trim()
         val total = text.length
-        val blockCounts = HashMap<BlockKind, Int>()
+        val result = ArrayList<TypedBlock>()
 
-        // Line boundaries: starts[i]..starts[i+1)-1, last line ends at total.
         val lineStarts = ArrayList<Int>()
         run {
             var i = text.indexOf('\n')
@@ -151,7 +179,7 @@ object ReaderTypesetter {
                 continue
             }
 
-            // Code fence: gather the whole run of code-looking lines.
+            // Code: gather the whole run of code-looking lines.
             if (looksLikeCode(trimmed)) {
                 var lj = li
                 while (lj + 1 < lineStarts.size) {
@@ -159,15 +187,13 @@ object ReaderTypesetter {
                     if (next.isEmpty() || !looksLikeCode(next)) break
                     lj++
                 }
-                applyCode(out, lineStart, lineEndOf(lj), style)
-                blockCounts[BlockKind.CODE] = (blockCounts[BlockKind.CODE] ?: 0) + 1
+                result.add(TypedBlock(BlockKind.CODE, lineStart, lineEndOf(lj)))
                 li = lj + 1
                 firstContentLineSeen = true
                 continue
             }
 
-            // Paragraph: gather every following line that is neither blank nor
-            // code, so a wrapped paragraph keeps a single indent and gap.
+            // Paragraph run: every following line that is neither blank nor code.
             var lj = li
             while (lj + 1 < lineStarts.size) {
                 val next = trimmedOf(lj + 1)
@@ -177,36 +203,24 @@ object ReaderTypesetter {
             val runEnd = lineEndOf(lj)
             val singleLine = (lj == li)
 
-            when {
-                !firstContentLineSeen && title.isNotEmpty() && trimmed == title -> {
-                    applyChapterTitle(out, lineStart, runEnd, style)
-                    blockCounts[BlockKind.TITLE] = (blockCounts[BlockKind.TITLE] ?: 0) + 1
-                }
-
-                headingLevel(trimmed) > 0 && singleLine -> {
-                    applyHeading(out, lineStart, runEnd, style)
-                    blockCounts[BlockKind.HEADING] = (blockCounts[BlockKind.HEADING] ?: 0) + 1
-                }
-
-                headingLevel(trimmed) > 0 -> {
-                    // A heading fused with its body (no blank line between the
-                    // two): style the first line, typeset the rest as prose.
-                    applyHeading(out, lineStart, lineEndOf(li), style)
-                    applyParagraph(out, lineStarts[li + 1], runEnd, lineEndOf(li + 1), style)
-                    blockCounts[BlockKind.HEADING] = (blockCounts[BlockKind.HEADING] ?: 0) + 1
-                    blockCounts[BlockKind.PARAGRAPH] = (blockCounts[BlockKind.PARAGRAPH] ?: 0) + 1
-                }
-
-                else -> {
-                    applyParagraph(out, lineStart, runEnd, lineEndOf(li), style)
-                    blockCounts[BlockKind.PARAGRAPH] = (blockCounts[BlockKind.PARAGRAPH] ?: 0) + 1
-                }
+            if (!firstContentLineSeen && title.isNotEmpty() && trimmed == title) {
+                result.add(TypedBlock(BlockKind.TITLE, lineStart, runEnd))
+                lastBlockCounts = mapOf(BlockKind.TITLE to 1)
+            } else if (headingLevel(trimmed) > 0 && singleLine) {
+                result.add(TypedBlock(BlockKind.HEADING, lineStart, runEnd))
+            } else if (headingLevel(trimmed) > 0) {
+                // Heading fused with its body: two blocks, first line heading.
+                result.add(TypedBlock(BlockKind.HEADING, lineStart, lineEndOf(li)))
+                result.add(TypedBlock(BlockKind.PARAGRAPH, lineStarts[li + 1], runEnd))
+            } else {
+                result.add(TypedBlock(BlockKind.PARAGRAPH, lineStart, runEnd))
             }
             firstContentLineSeen = true
             li = lj + 1
         }
-        lastBlockCounts = blockCounts
-        return out
+
+        lastBlockCounts = result.groupingBy { it.kind }.eachCount()
+        return result
     }
 
     /** Block census of the last [layout] call, for diagnostics. */
