@@ -41,6 +41,7 @@ import com.oceanreader.data.model.FontFamilyOption
 import kotlinx.coroutines.launch
 import com.oceanreader.reader.HighlightSpan
 import com.oceanreader.reader.ReaderPanel
+import com.oceanreader.reader.ReaderDiagnostics
 import com.oceanreader.reader.ReaderStyle
 import com.oceanreader.reader.ReaderTypesetter
 import com.oceanreader.reader.ReaderUiState
@@ -309,6 +310,43 @@ private fun ReaderSurface(
                 justify = style.justify
             )
             vm.reportPagination(paginator.pageCount)
+            ReaderDiagnostics.style(
+                ReaderDiagnostics.StyleReport(
+                    fontSizeSp = prefs.fontSize,
+                    fontSizePx = style.fontSizePx,
+                    lineSpacingMultiplier = style.lineSpacing,
+                    paragraphSpacingPx = style.paragraphSpacingPx,
+                    paragraphSpacingEm = prefs.paragraphSpacing,
+                    indentPx = style.indentPx,
+                    marginsPx = style.marginHorizontalPx to style.marginVerticalPx,
+                    fontFamily = prefs.fontFamily.name,
+                    bold = prefs.boldText,
+                    justify = prefs.justifyText,
+                    palette = palette?.id ?: "theme"
+                )
+            )
+            ReaderDiagnostics.chapter(
+                bookId = state.book?.id ?: "-",
+                chapterIndex = state.chapterIndex,
+                chapterTitle = state.chapterTitle,
+                textLength = styledText.length,
+                blockCounts = ReaderTypesetter.lastBlockCounts,
+                lineCount = paginator.layout()?.lineCount ?: -1
+            )
+            ReaderDiagnostics.pagination(
+                bookId = state.book?.id ?: "-",
+                chapterIndex = state.chapterIndex,
+                pageCount = paginator.pageCount,
+                contentHeightPx = contentH,
+                layoutHeightPx = paginator.layout()?.height ?: -1,
+                linesPerPage = (0 until paginator.pageCount.coerceAtMost(12)).map { p ->
+                    paginator.endOf(p) - paginator.startOf(p)
+                },
+                lineHeightsOfPage0 = paginator.layout()?.let { l ->
+                    val first = l.getLineForVertical(paginator.topOf(0)).coerceIn(0, l.lineCount - 1)
+                    first to (l.getLineBottom(first) - l.getLineTop(first))
+                }
+            )
             val restore = state.restoreOffset
             if (restore > 0 && restore < styledText.length) {
                 val page = paginator.pageOf(restore)
