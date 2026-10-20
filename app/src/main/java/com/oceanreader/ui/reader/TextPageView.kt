@@ -55,7 +55,8 @@ fun TextPageView(
     speechCursor: SpeechCursor,
     highlights: List<HighlightSpan>,
     onPageChanged: (Int, Int) -> Unit,
-    onLongPress: (Int) -> Unit
+    onLongPress: (Int) -> Unit,
+    topInsetPx: Float = 0f
 ) {
     val pageCount = paginator.pageCount
     var dragOffset by remember { mutableFloatStateOf(0f) }
@@ -119,7 +120,8 @@ fun TextPageView(
                 native.save()
                 native.translate(
                     style.marginHorizontalPx,
-                    style.marginVerticalPx - top + dragOffset
+                    // + topInsetPx keeps the first line below the top chrome.
+                    style.marginVerticalPx + topInsetPx - top + dragOffset
                 )
 
                 // Paints one highlight range as a run of line rects.
