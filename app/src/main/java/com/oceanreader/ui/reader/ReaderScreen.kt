@@ -251,14 +251,6 @@ private fun ReaderSurface(
         )
     }
 
-    // Live preview so typography changes are visible without closing the sheet.
-    val previewBlocks = remember(SAMPLE_PREVIEW, style) {
-        ReaderTypesetter.blocks(SAMPLE_PREVIEW, style, SAMPLE_PREVIEW_TITLE)
-    }
-    val previewAnnotated = remember(previewBlocks, style, prefs) {
-        ChapterAnnotator.annotate(SAMPLE_PREVIEW, previewBlocks, style, prefs)
-    }
-
     val paint = remember(style) {
         android.text.TextPaint().apply {
             isAntiAlias = true
@@ -704,9 +696,45 @@ private fun TocPanel(state: ReaderUiState, vm: ReaderViewModel) {
 @Composable
 private fun AppearancePanel(vm: ReaderViewModel) {
     val prefs by vm.prefs.collectAsState()
+    val density = LocalDensity.current
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val scheme = MaterialTheme.colorScheme
     val palettes = if (dark) PagePalettesDark else PagePalettesLight
     val paletteId = if (dark) prefs.darkPagePalette else prefs.pagePalette
+    val palette = palettes.firstOrNull { it.id == paletteId }
+
+    // The same resolved style the reading surface uses, so the preview below
+    // is pixel-honest about font size / line height / indent.
+    val previewStyle = remember(prefs.fontSize, prefs.lineSpacing, prefs.horizontalPadding, prefs.verticalPadding, prefs.firstLineIndent, prefs.boldText, prefs.justifyText, prefs.fontFamily, density) {
+        ReaderStyle(
+            fontSizePx = with(density) { prefs.fontSize.sp.toPx() },
+            lineSpacing = prefs.lineSpacing.coerceAtLeast(1.35f),
+            marginHorizontalPx = with(density) { prefs.horizontalPadding.dp.toPx() },
+            marginVerticalPx = with(density) { prefs.verticalPadding.dp.toPx() },
+            indentPx = with(density) { (prefs.fontSize * prefs.firstLineIndent).sp.toPx() },
+            bold = prefs.boldText,
+            justify = prefs.justifyText,
+            backgroundColor = palette?.background?.toArgb() ?: scheme.background.toArgb(),
+            textColor = palette?.text?.toArgb() ?: scheme.onBackground.toArgb(),
+            sentenceColor = 0xFFFFB74D.toInt(),
+            wordColor = 0xFFFF9800.toInt(),
+            typeface = when (prefs.fontFamily) {
+                FontFamilyOption.SANS -> Typeface.SANS_SERIF
+                FontFamilyOption.SERIF -> Typeface.SERIF
+                FontFamilyOption.ROUNDED -> Typeface.create("sans-serif", Typeface.NORMAL)
+                FontFamilyOption.MONO -> Typeface.MONOSPACE
+            },
+            paragraphSpacingPx = with(density) { prefs.fontSize.sp.toPx() } * prefs.paragraphSpacing / 100f,
+            headingColor = palette?.secondary?.toArgb() ?: scheme.onBackground.toArgb(),
+            codeBackground = (0x22 shl 24) or ((palette?.secondary?.toArgb() ?: scheme.onSurface.toArgb()) and 0x00FFFFFF)
+        )
+    }
+    val previewBlocks = remember(SAMPLE_PREVIEW, previewStyle) {
+        ReaderTypesetter.blocks(SAMPLE_PREVIEW, previewStyle, SAMPLE_PREVIEW_TITLE)
+    }
+    val previewAnnotated = remember(previewBlocks, previewStyle, prefs) {
+        ChapterAnnotator.annotate(SAMPLE_PREVIEW, previewBlocks, previewStyle, prefs)
+    }
 
     Column(
         modifier = Modifier
@@ -728,7 +756,7 @@ private fun AppearancePanel(vm: ReaderViewModel) {
                 text = previewAnnotated,
                 style = TextStyle(
                     fontSize = ChapterAnnotator.fontSizeSp(prefs).sp,
-                    lineHeight = ChapterAnnotator.lineHeightSp(style, prefs),
+                    lineHeight = ChapterAnnotator.lineHeightSp(previewStyle, prefs),
                     fontFamily = ChapterAnnotator.fontFamilyOf(prefs.fontFamily),
                     color = palette?.text ?: scheme.onBackground,
                     textIndent = TextIndent(
