@@ -361,13 +361,16 @@ class ReaderViewModel(
         if (s.isPaged) return
         lastScrollPercent = fraction.coerceIn(0f, 1f)
         _ui.value = s.copy(percent = lastScrollPercent * bookPercentScale(s))
+        val book = s.book ?: return
+        val chapter = s.chapterIndex
+        val percent = _ui.value.percent
         viewModelScope.launch {
-            saveProgress(
-                book = s.book ?: return@launch,
-                chapter = s.chapterIndex,
+            repo.saveProgress(
+                book = book,
+                chapter = chapter,
                 offset = 0,
                 page = s.pageIndex,
-                percent = _ui.value.percent
+                percent = percent
             )
         }
     }
