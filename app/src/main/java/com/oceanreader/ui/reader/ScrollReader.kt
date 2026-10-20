@@ -30,6 +30,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.oceanreader.data.Settings
@@ -151,16 +152,21 @@ fun ScrollReaderView(
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        viewportHeight = with(LocalDensity.current) { maxHeight.toPx() }
+        val density = LocalDensity.current
+        viewportHeight = with(density) { maxHeight.toPx() }
+        val paddingHorizontal: Dp = with(density) { style.marginHorizontalPx.toDp() }
+        val paddingTop: Dp = with(density) { (style.marginVerticalPx + topInsetPx).toDp() }
+        val paddingBottom: Dp = with(density) { (style.marginVerticalPx + bottomInsetPx).toDp() }
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(style.backgroundColor))
                 .verticalScroll(scrollState)
                 .padding(
-                    horizontal = with(LocalDensity.current) { style.marginHorizontalPx.toDp() },
-                    top = with(LocalDensity.current) { (style.marginVerticalPx + topInsetPx).toDp() },
-                    bottom = with(LocalDensity.current) { (style.marginVerticalPx + bottomInsetPx).toDp() }
+                    start = paddingHorizontal,
+                    end = paddingHorizontal,
+                    top = paddingTop,
+                    bottom = paddingBottom
                 )
         ) {
             Text(
