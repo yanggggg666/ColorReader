@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -38,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.oceanreader.data.Settings
 import com.oceanreader.data.model.FontFamilyOption
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.oceanreader.reader.HighlightSpan
 import com.oceanreader.reader.ReaderPanel
@@ -310,6 +313,7 @@ private fun ReaderSurface(
                 justify = style.justify
             )
             vm.reportPagination(paginator.pageCount)
+            ReaderDiagnostics.beginChapter()
             ReaderDiagnostics.style(
                 ReaderDiagnostics.StyleReport(
                     fontSizeSp = prefs.fontSize,
@@ -814,6 +818,52 @@ private fun AppearancePanel(vm: ReaderViewModel) {
                             modifier = Modifier.size(18.dp)
                         )
                     }
+                }
+            }
+        }
+
+        // ---- diagnostics: logcat is invisible to us on most OEM ROMs, so the
+        // same numbers live here, one tap away from being copied out.
+        var diagOpen by remember { mutableStateOf(false) }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { diagOpen = !diagOpen }
+                .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("诊断信息", modifier = Modifier.weight(1f))
+            Icon(
+                if (diagOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = null
+            )
+        }
+        if (diagOpen) {
+            val clipboard = LocalClipboardManager.current
+            val report by produceState(initialValue = ReaderDiagnostics.lastReport) {
+                while (true) {
+                    value = ReaderDiagnostics.lastReport
+                    delay(500)
+                }
+            }
+            Text(
+                text = report.ifBlank { "打开一本书后在此生成" },
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                fontSize = 10.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = AppSpacing.screen)
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = AppSpacing.screen),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = { clipboard.setText(AnnotatedString(report)) }) {
+                    Text("复制诊断")
                 }
             }
         }
