@@ -146,19 +146,6 @@ fun SettingsScreen(
             )
 
             SettingRow(
-                title = "段间距",
-                subtitle = "${prefs.paragraphSpacing / 100f}em（相对字号）",
-                trailing = {
-                    Slider(
-                        value = prefs.paragraphSpacing.toFloat(),
-                        onValueChange = { write { settings.setParaSpacing(it.toInt()) } },
-                        valueRange = 0f..150f,
-                        modifier = Modifier.width(120.dp)
-                    )
-                }
-            )
-
-            SettingRow(
                 title = "页边距",
                 subtitle = "水平 ${prefs.horizontalPadding}dp",
                 trailing = {
