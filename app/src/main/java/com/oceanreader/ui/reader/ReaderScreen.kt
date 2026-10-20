@@ -357,6 +357,12 @@ private fun ReaderSurface(
                 val page = paginator.pageOf(restore)
                 vm.setPage(page, restore)
             }
+            paginator.layout()?.let { l ->
+                val heights = (0 until minOf(5, l.lineCount)).map { line ->
+                    l.getLineBottom(line) - l.getLineTop(line)
+                }
+                ReaderDiagnostics.lineHeights(heights)
+            }
         }
 
         // Follow the voice: keep the spoken sentence on screen (跟读).
@@ -724,13 +730,8 @@ private fun AppearancePanel(vm: ReaderViewModel) {
             range = 8f..64f,
             onChange = { v -> vm.setFont { store -> store.setMarginH(v.toInt()) } }
         )
-        SliderRow(
-            label = "段间距",
-            valueLabel = "${prefs.paragraphSpacing / 100f}em",
-            value = prefs.paragraphSpacing.toFloat(),
-            range = 0f..150f,
-            onChange = { v -> vm.setFont { store -> store.setParaSpacing(v.toInt()) } }
-        )
+        // 段落分隔采用源文本自带空行（Kindle 同款）；自定义段距 span 已移除，
+        // 原因见 ReaderTypesetter 顶部注释。
 
         // First-line indent
         Row(
