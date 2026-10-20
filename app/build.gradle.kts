@@ -1,8 +1,40 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+}
+
+/**
+ * Stable debug signing.
+ *
+ * Without this, every CI run (fresh VM) gets a new random debug keystore and
+ * users cannot overwrite-install new builds. The key is committed at
+ * keystore/debug.keystore; when it is missing (fresh local clone before CI
+ * ever ran) it is generated once, with the same well-known debug parameters,
+ * so signatures stay identical everywhere.
+ */
+val debugKeystore = rootProject.file("keystore/debug.keystore")
+if (!debugKeystore.exists()) {
+    if (!debugKeystore.parentFile.exists()) debugKeystore.parentFile.mkdirs()
+    providers.exec {
+        commandLine(
+            "keytool", "-genkeypair",
+            "-keystore", debugKeystore.absolutePath,
+            "-storetype", "PKCS12",
+            "-storepass", "android",
+            "-alias", "androiddebugkey",
+            "-keypass", "android",
+            "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
+            "-dname", "CN=Android Debug,O=Android,C=US"
+        )
+    }.let {
+        if (it.result.get().exitValue != 0) {
+            logger.warn("OceanReader: could not generate a debug keystore; falling back to AGP default")
+        }
+    }
 }
 
 android {
@@ -13,14 +45,26 @@ android {
         applicationId = "com.oceanreader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.1.2"
+        versionCode = 5
+        versionName = "1.1.3"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    signingConfigs {
+        if (debugKeystore.exists()) {
+            create("sharedDebug") {
+                storeFile = debugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
     }
 
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
+            signingConfigs.findByName("sharedDebug")?.let { signingConfig = it }
         }
         release {
             isMinifyEnabled = true
