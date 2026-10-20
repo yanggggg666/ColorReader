@@ -1,13 +1,11 @@
 package com.oceanreader.reader
 
-import android.graphics.Paint.FontMetricsInt
 import android.graphics.Typeface
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.LeadingMarginSpan
-import android.text.style.LineHeightSpan
 import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
@@ -57,34 +55,17 @@ enum class BlockKind {
 }
 
 /**
- * Adds vertical space under (or above) a line — the paragraph "margin-bottom"
- * that Android's span set lacks. Applied to the last character of a block so
- * the space lands between blocks only, exactly like the CSS margin used by
- * WeRead-style engines.
+ * Paragraph separation is deliberately *not* a custom span.
+ *
+ * A `LineHeightSpan` that mutates `FontMetricsInt` incrementally
+ * (`fm.descent += n`) is unsafe: StaticLayout reuses one metrics object across
+ * the lines it measures and does not reset it between them, so the extra
+ * pixels stack up down a multi-line paragraph (and the line-spacing
+ * multiplier then amplifies the whole box) — long paragraphs ended up with
+ * several times their intended pitch while single-line ones looked fine.
+ * Blank lines from the source text are the separation instead, which is what
+ * mainstream readers (Kindle included) do.
  */
-class BlockSpacingSpan(
-    private val extraPx: Int,
-    private val above: Boolean = false
-) : LineHeightSpan {
-
-    override fun chooseHeight(
-        text: CharSequence,
-        start: Int,
-        end: Int,
-        spanStartVertical: Int,
-        lineHeight: Int,
-        fm: FontMetricsInt
-    ) {
-        if (extraPx <= 0) return
-        // The layout derives the line height from ascent/descent (like the
-        // platform's LineHeightSpan.Standard does), so move those, not top/bottom.
-        if (above) {
-            fm.ascent -= extraPx
-        } else {
-            fm.descent += extraPx
-        }
-    }
-}
 
 /**
  * Turns a chapter's flat text into a styled block stream.
@@ -251,31 +232,11 @@ object ReaderTypesetter {
 
     // ---------------------------------------------------------------- spans
 
-    /**
-     * Spacing is expressed in em (multiples of the body font size) the way
-     * WeRead's TypesetGlue / Readori's paragraphSpacing work, so the pitch
-     * stays balanced at every font size instead of inflating with density.
-     * These are the per-block factors multiplied by [ReaderStyle.paragraphSpacingEm].
-     */
-    private const val TITLE_SPACE_BEFORE_EM = 0.3f
-    private const val TITLE_SPACE_AFTER_EM = 1.2f
-    private const val HEADING_SPACE_BEFORE_EM = 0.3f
-    private const val HEADING_SPACE_AFTER_EM = 0.6f
-    private const val PARAGRAPH_SPACE_AFTER_EM = 1.0f
-    private const val CODE_SPACE_BEFORE_EM = 0.5f
-    private const val CODE_SPACE_AFTER_EM = 0.7f
-
     private fun applyChapterTitle(out: SpannableStringBuilder, start: Int, end: Int, style: ReaderStyle) {
         if (end <= start) return
         out.setSpan(RelativeSizeSpan(style.titleScale), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(StyleSpan(android.graphics.Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(ForegroundColorSpan(style.headingColor), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        val step = style.paragraphSpacingPx
-        blockSpacing(
-            out, start, end, style,
-            after = step * TITLE_SPACE_AFTER_EM,
-            before = step * TITLE_SPACE_BEFORE_EM
-        )
     }
 
     private fun applyHeading(out: SpannableStringBuilder, start: Int, end: Int, style: ReaderStyle) {
@@ -283,12 +244,6 @@ object ReaderTypesetter {
         out.setSpan(RelativeSizeSpan(style.headingScale), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(StyleSpan(android.graphics.Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(ForegroundColorSpan(style.headingColor), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        val step = style.paragraphSpacingPx
-        blockSpacing(
-            out, start, end, style,
-            after = step * HEADING_SPACE_AFTER_EM,
-            before = step * HEADING_SPACE_BEFORE_EM
-        )
     }
 
     /**
@@ -311,66 +266,11 @@ object ReaderTypesetter {
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
             )
         }
-        // One block gap per paragraph — never before, so consecutive prose
-        // keeps a single, predictable pitch.
-        blockSpacing(out, start, end, style, after = style.paragraphSpacingPx * PARAGRAPH_SPACE_AFTER_EM, before = 0f)
     }
 
     private fun applyCode(out: SpannableStringBuilder, start: Int, end: Int, style: ReaderStyle) {
         if (end <= start) return
         out.setSpan(TypefaceSpan("monospace"), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         out.setSpan(BackgroundColorSpan(style.codeBackground), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        val step = style.paragraphSpacingPx
-        blockSpacing(
-            out, start, end, style,
-            after = step * CODE_SPACE_AFTER_EM,
-            before = step * CODE_SPACE_BEFORE_EM
-        )
-    }
-
-    /**
-     * Adds breathing room around a block by spacing its first and last
-     * characters. Length is never touched, so offsets stay stable.
-     */
-    private fun blockSpacing(
-        out: SpannableStringBuilder,
-        start: Int,
-        end: Int,
-        style: ReaderStyle,
-        after: Float,
-        before: Float
-    ) {
-        if (before > 0f) {
-            val first = firstNonSpace(out, start, end)
-            if (first >= 0) {
-                out.setSpan(
-                    BlockSpacingSpan(before.toInt().coerceAtLeast(1), above = true),
-                    first, first + 1,
-                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                )
-            }
-        }
-        if (after > 0f) {
-            val last = lastNonSpace(out, start, end)
-            if (last >= 0) {
-                out.setSpan(
-                    BlockSpacingSpan(after.toInt().coerceAtLeast(1)),
-                    last, last + 1,
-                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                )
-            }
-        }
-    }
-
-    private fun firstNonSpace(sb: SpannableStringBuilder, start: Int, end: Int): Int {
-        var i = start
-        while (i < end && sb[i].isWhitespace()) i++
-        return if (i < end) i else -1
-    }
-
-    private fun lastNonSpace(sb: SpannableStringBuilder, start: Int, end: Int): Int {
-        var i = end - 1
-        while (i >= start && sb[i].isWhitespace()) i--
-        return if (i >= start) i else -1
     }
 }
