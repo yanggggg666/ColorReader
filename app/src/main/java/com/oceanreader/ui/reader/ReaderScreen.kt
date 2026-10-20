@@ -204,6 +204,22 @@ private fun ReaderSurface(
 ) {
     val density = LocalDensity.current
     val scheme = MaterialTheme.colorScheme
+    val context = LocalContext.current
+
+    // While the top/bottom chrome is visible the text must not hide behind
+    // it: the reading area shrinks by the real bar heights (measured, plus
+    // the system status/navigation insets) so no line is ever covered. When
+    // the chrome is dismissed the surface returns to full screen.
+    val topInsetPx = if (state.chromeVisible) {
+        with(density) { 56.dp.toPx() } + statusBarHeightPx(context)
+    } else {
+        0f
+    }
+    val bottomInsetPx = if (state.chromeVisible) {
+        with(density) { 100.dp.toPx() } + navigationBarHeightPx(context)
+    } else {
+        0f
+    }
 
     // The reading surface uses the user's page palette (纸白/羊皮/护眼/…),
     // falling back to the theme colours when nothing matches.
@@ -310,10 +326,17 @@ private fun ReaderSurface(
         val widthPx = with(density) { maxWidth.toPx() }
         val heightPx = with(density) { maxHeight.toPx() }
 
-        // Paginate whenever the chapter, the viewport or the style changes.
-        LaunchedEffect(styledText, paint, widthPx, heightPx, style.lineSpacing, style.justify, style.marginHorizontalPx, style.marginVerticalPx) {
+        // Paginate whenever the chapter, the viewport, the style or the chrome
+        // visibility changes (the page height shrinks while the bars show).
+        LaunchedEffect(
+            styledText, paint, widthPx, heightPx, style.lineSpacing, style.justify,
+            style.marginHorizontalPx, style.marginVerticalPx, topInsetPx, bottomInsetPx
+        ) {
             val contentW = (widthPx - style.marginHorizontalPx * 2).toInt().coerceAtLeast(1)
-            val contentH = (heightPx - style.marginVerticalPx * 2).toInt().coerceAtLeast(1)
+            // Chrome insets come off the page so no line hides under the bars.
+            val contentH = (
+                heightPx - style.marginVerticalPx * 2 - topInsetPx - bottomInsetPx
+                ).toInt().coerceAtLeast(1)
             paginator.paginate(
                 text = styledText,
                 paint = paint,
@@ -409,6 +432,8 @@ private fun ReaderSurface(
                 speechCursor = speechCursor,
                 onNextChapter = vm::nextChapter,
                 onProgress = vm::onScrollProgress,
+                topInsetPx = topInsetPx,
+                bottomInsetPx = bottomInsetPx,
                 onLongPress = { offset -> vm.onLongPressAt(offset) }
             )
         } else {
@@ -418,6 +443,7 @@ private fun ReaderSurface(
                 page = state.pageIndex,
                 speechCursor = speechCursor,
                 highlights = highlightSpans,
+                topInsetPx = topInsetPx,
                 onPageChanged = { page, offset ->
                     vm.onPageRendered(page, offset)
                     onSelection("", -1, -1)
@@ -1222,3 +1248,15 @@ private fun NotesPanel(state: ReaderUiState, vm: ReaderViewModel) {
 /** Sample text for the live typesetting preview inside 排版. */
 private const val SAMPLE_PREVIEW_TITLE = "第一章 夜色"
 private const val SAMPLE_PREVIEW = "第一章 夜色\n\n夜色像潮水一样漫上来，把整座城市泡得发软。他站在窗前，\n手里捏着那张薄薄的纸片，纸片边缘已经被汗浸得发皱。\n\n路灯一盏盏亮起来，橙黄色的光落在纸片上，把那行小字照得格外清楚。\n\n他忽然想起很多年前，也有人这样站在这里，对他说：会好的。"
+
+/** Real status-bar height in pixels (0 when unavailable). */
+private fun statusBarHeightPx(context: android.content.Context): Int {
+    val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+    return if (id > 0) context.resources.getDimensionPixelSize(id) else 0
+}
+
+/** Real navigation-bar height in pixels (0 on gesture navigation). */
+private fun navigationBarHeightPx(context: android.content.Context): Int {
+    val id = context.resources.getIdentifier("navigation_bar_height", "dimen", "android")
+    return if (id > 0) context.resources.getDimensionPixelSize(id) else 0
+}
