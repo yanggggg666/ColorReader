@@ -124,6 +124,7 @@ fun ReaderScreen(
                         ReaderMenuAction.BOOKMARKS -> vm.setPanel(ReaderPanel.BOOKMARK)
                         ReaderMenuAction.NOTES -> vm.setPanel(ReaderPanel.NOTES)
                         ReaderMenuAction.APPEARANCE -> vm.setPanel(ReaderPanel.APPEARANCE)
+                        ReaderMenuAction.DIAGNOSTICS -> vm.setPanel(ReaderPanel.DIAGNOSTICS)
                     }
                 }
             )
@@ -399,7 +400,7 @@ private fun ReaderSurface(
 // ------------------------------------------------------------------- chrome
 
 /** Items of the reader's overflow menu (secondary actions live here). */
-enum class ReaderMenuAction { SEARCH, SPEECH, BOOKMARKS, NOTES, APPEARANCE }
+enum class ReaderMenuAction { SEARCH, SPEECH, BOOKMARKS, NOTES, APPEARANCE, DIAGNOSTICS }
 
 @Composable
 private fun ReaderTopBar(
@@ -479,6 +480,11 @@ private fun ReaderTopBar(
                         text = { Text("排版") },
                         leadingIcon = { Icon(Icons.Default.TextFields, null) },
                         onClick = { menuOpen = false; onMore(ReaderMenuAction.APPEARANCE) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("诊断信息") },
+                        leadingIcon = { Icon(Icons.Default.Analytics, null) },
+                        onClick = { menuOpen = false; onMore(ReaderMenuAction.DIAGNOSTICS) }
                     )
                 }
             }
@@ -630,6 +636,7 @@ private fun ReaderPanelSheet(
             ReaderPanel.SEARCH -> SearchPanel(state = state, vm = vm)
             ReaderPanel.BOOKMARK -> BookmarkPanel(state = state, vm = vm)
             ReaderPanel.NOTES -> NotesPanel(state = state, vm = vm)
+            ReaderPanel.DIAGNOSTICS -> DiagnosticsPanel()
             ReaderPanel.NONE -> {}
         }
     }
@@ -667,6 +674,7 @@ private fun AppearancePanel(vm: ReaderViewModel) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
             .padding(bottom = 24.dp)
     ) {
         SheetHeader(title = "排版", subtitle = "字号、行距、边距与页面底色即时生效")
@@ -822,49 +830,50 @@ private fun AppearancePanel(vm: ReaderViewModel) {
             }
         }
 
-        // ---- diagnostics: logcat is invisible to us on most OEM ROMs, so the
-        // same numbers live here, one tap away from being copied out.
-        var diagOpen by remember { mutableStateOf(false) }
+    }
+}
+
+/**
+ * Standalone diagnostics sheet (top-bar ⋮ → 诊断信息).
+ *
+ * Shows the paginator's live report for the open chapter: resolved style,
+ * block census and per-page line counts — the data needed to answer
+ * "why is this page sparse" without reading a device log, which Android
+ * forbids across apps.
+ */
+@Composable
+private fun DiagnosticsPanel() {
+    val clipboard = LocalClipboardManager.current
+    val report by produceState(initialValue = ReaderDiagnostics.lastReport) {
+        while (true) {
+            value = ReaderDiagnostics.lastReport
+            delay(500)
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 24.dp)
+    ) {
+        SheetHeader(title = "诊断信息", subtitle = "排版引擎内部状态，可复制后反馈")
+        Text(
+            text = report.ifBlank { "打开一本书后在此生成" },
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            fontSize = 10.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 360.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = AppSpacing.screen)
+        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { diagOpen = !diagOpen }
-                .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.md),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = AppSpacing.screen),
+            horizontalArrangement = Arrangement.End
         ) {
-            Text("诊断信息", modifier = Modifier.weight(1f))
-            Icon(
-                if (diagOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                contentDescription = null
-            )
-        }
-        if (diagOpen) {
-            val clipboard = LocalClipboardManager.current
-            val report by produceState(initialValue = ReaderDiagnostics.lastReport) {
-                while (true) {
-                    value = ReaderDiagnostics.lastReport
-                    delay(500)
-                }
-            }
-            Text(
-                text = report.ifBlank { "打开一本书后在此生成" },
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                fontSize = 10.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 220.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = AppSpacing.screen)
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = AppSpacing.screen),
-                horizontalArrangement = Arrangement.End
-            ) {
-                TextButton(onClick = { clipboard.setText(AnnotatedString(report)) }) {
-                    Text("复制诊断")
-                }
+            TextButton(onClick = { clipboard.setText(AnnotatedString(report)) }) {
+                Text("复制诊断")
             }
         }
     }
