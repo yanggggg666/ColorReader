@@ -7,6 +7,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,6 +30,39 @@ jobs:
         run: |
           echo "sdk.dir=${ANDROID_SDK_ROOT}" > local.properties
           cat local.properties
+
+      # GitHub runners are ephemeral, so AGP would generate a fresh random
+      # debug keystore on every run — every APK would carry a different
+      # signature and users could not overwrite-install. Generate the key
+      # once, commit it, and every later build signs identically. A debug
+      # key is public by design (password "android"); treating it as
+      # revocable and documented, see README.
+      - name: Ensure shared debug keystore
+        run: |
+          if [ ! -f keystore/debug.keystore ]; then
+            echo "==> generating shared debug keystore"
+            mkdir -p keystore
+            keytool -genkeypair -v \
+              -keystore keystore/debug.keystore \
+              -storetype PKCS12 \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            B64=$(base64 -w0 keystore/debug.keystore)
+            printf '{"message":"chore: shared debug keystore for stable signing [skip ci]","content":"%s","branch":"%s"}' \
+              "$B64" "${GITHUB_REF_NAME}" > /tmp/ks.json
+            curl -sS -X PUT \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/json" \
+              --data-binary @/tmp/ks.json \
+              "https://api.github.com/repos/${{ github.repository }}/contents/keystore/debug.keystore" \
+              | head -c 200
+          else
+            echo "==> keystore already in repo"
+          fi
 
       - name: Generate Gradle wrapper
         run: gradle wrapper --gradle-version 8.9
