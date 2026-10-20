@@ -5,15 +5,26 @@ import android.util.Log
 /**
  * Field diagnostics for the reading surface.
  *
- * Every build logs the paginator's view of the world under the `OceanReader`
- * tag so a support session can be answered with data instead of guesses:
- * what the style resolved to, how the chapter was split into blocks, how many
- * lines each page holds and where the spacing spans landed. Call [dump] after
- * pagination; pull it with `logcat -d | grep OceanReader`.
+ * The same report goes two places: logcat (tag `OceanReader`, best effort —
+ * Android blocks cross-app log reading on most devices) and an in-memory
+ * buffer that the reading UI shows under 排版 → 诊断信息 with a copy button,
+ * so a support session can be answered with data instead of guesses.
  */
 object ReaderDiagnostics {
 
     private const val TAG = "OceanReader"
+
+    /** Latest report of the current chapter; empty until a book is opened. */
+    @Volatile
+    var lastReport: String = ""
+        private set
+
+    private val buffer = StringBuilder()
+
+    /** Drops the previous chapter's report before the next one is collected. */
+    fun beginChapter() {
+        buffer.setLength(0)
+    }
 
     /** Snapshot of everything that decides the vertical rhythm. */
     data class StyleReport(
@@ -31,15 +42,14 @@ object ReaderDiagnostics {
     )
 
     fun style(report: StyleReport) {
-        Log.i(
-            TAG,
+        val line =
             "STYLE fontSize=${report.fontSizeSp}sp(${report.fontSizePx}px) " +
                 "lineMult=${report.lineSpacingMultiplier} " +
                 "paraSpacing=${report.paragraphSpacingEm / 100f}em(${report.paragraphSpacingPx}px) " +
                 "indent=${report.indentPx}px margins=${report.marginsPx.first}x${report.marginsPx.second} " +
                 "font=${report.fontFamily} bold=${report.bold} justify=${report.justify} " +
                 "palette=${report.palette}"
-        )
+        append(line)
     }
 
     /** Per-chapter shape: how the typesetter saw the text. */
@@ -52,16 +62,15 @@ object ReaderDiagnostics {
         lineCount: Int
     ) {
         val blocks = BlockKind.entries.joinToString(",") { "${it.name}=${blockCounts[it] ?: 0}" }
-        Log.i(
-            TAG,
+        append(
             "CHAPTER book=$bookId idx=$chapterIndex title='$chapterTitle' " +
                 "chars=$textLength lines=$lineCount blocks=[$blocks]"
         )
     }
 
     /**
-     * Pagination result: page boundaries, lines per page and the first/last
-     * line height of a page — the numbers that explain "a few lines per page".
+     * Pagination result: page boundaries, lines per page and the first line
+     * height — the numbers that explain "a few lines per page".
      */
     fun pagination(
         bookId: String,
@@ -72,8 +81,7 @@ object ReaderDiagnostics {
         linesPerPage: List<Int>,
         lineHeightsOfPage0: Pair<Int, Int>?
     ) {
-        Log.i(
-            TAG,
+        append(
             "PAGINATE book=$bookId idx=$chapterIndex pages=$pageCount " +
                 "contentH=${contentHeightPx}px layoutH=${layoutHeightPx}px " +
                 "linesPerPage=${linesPerPage.take(12)}" +
@@ -84,5 +92,12 @@ object ReaderDiagnostics {
     /** Anything that goes wrong while reading, tagged for easy grep. */
     fun error(where: String, detail: String) {
         Log.e(TAG, "ERROR at $where: $detail")
+        append("ERROR at $where: $detail")
+    }
+
+    private fun append(line: String) {
+        Log.i(TAG, line)
+        buffer.append(line).append('\n')
+        lastReport = buffer.toString()
     }
 }
