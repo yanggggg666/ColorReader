@@ -37,7 +37,9 @@ data class ShelfUiState(
     val selection: Set<String> = emptySet(),
     val sortMode: Int = 0,
     val gridColumns: Int = 0,
-    val gridCover: Boolean = true
+    val gridCover: Boolean = true,
+    val minimalTheme: Boolean = true,
+    val scrollMode: Boolean = true
 )
 
 class ShelfViewModel(app: Application) : AndroidViewModel(app) {
@@ -95,7 +97,9 @@ class ShelfViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.value = _ui.value.copy(
                     sortMode = p.shelfSort.ordinal,
                     gridColumns = p.gridColumns,
-                    gridCover = p.showCoverGrid
+                    gridCover = p.showCoverGrid,
+                    minimalTheme = p.minimalTheme,
+                    scrollMode = p.scrollMode
                 )
             }
         }
