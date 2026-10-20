@@ -1,8 +1,7 @@
 package com.oceanreader.ui.reader
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,11 +18,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,9 +43,9 @@ import com.oceanreader.tts.SpeechCursor
  * Continuous vertical scrolling reader (WeRead-style).
  *
  * The whole chapter is one Compose text block: swiping up/down scrolls it
- * line by line, the spoken sentence is followed into view during 跟读, and
- * the chapter ends with a tappable 下一章 (plus a 回到顶部 hint) so a short
- * chapter never leaves you stranded.
+ * line by line, the spoken sentence is highlighted and followed into view
+ * during 跟读, long-press picks a sentence (read from here / highlight /
+ * note), and the chapter ends with a tappable 下一章.
  */
 @Composable
 fun ScrollReaderView(
@@ -52,7 +57,8 @@ fun ScrollReaderView(
     prefs: Settings,
     speechCursor: SpeechCursor,
     onNextChapter: () -> Unit,
-    onProgress: (Float) -> Unit
+    onProgress: (Float) -> Unit,
+    onLongPress: (Int) -> Unit = {}
 ) {
     var viewportHeight by remember { mutableStateOf(1f) }
     val scrollState = rememberScrollState()
@@ -61,8 +67,41 @@ fun ScrollReaderView(
     val blocks: List<TypedBlock> = remember(chapterText, chapterIndex, style) {
         ReaderTypesetter.blocks(chapterText, style, chapterTitle)
     }
-    val annotated = remember(blocks, style, prefs, chapterText) {
+    val baseAnnotated = remember(blocks, style, prefs, chapterText) {
         ChapterAnnotator.annotate(chapterText, blocks, style, prefs)
+    }
+
+    // 跟读高亮: the spoken sentence (and word, when the engine reports ranges)
+    // is tinted in place. Rebuilding per sentence is cheap next to a relayout.
+    val annotated: AnnotatedString = remember(baseAnnotated, speechCursor) {
+        if (!speechCursor.hasSentence) {
+            baseAnnotated
+        } else {
+            val s = speechCursor.sentenceStart.coerceIn(0, baseAnnotated.length)
+            val e = speechCursor.sentenceEnd.coerceIn(s, baseAnnotated.length)
+            buildAnnotatedString {
+                append(baseAnnotated)
+                addStyle(
+                    SpanStyle(
+                        background = Color(style.sentenceColor).copy(alpha = 0.30f)
+                    ),
+                    s, e
+                )
+                if (speechCursor.wordStart >= 0 && speechCursor.wordEnd > speechCursor.wordStart) {
+                    val ws = speechCursor.wordStart.coerceIn(s, baseAnnotated.length)
+                    val we = speechCursor.wordEnd.coerceIn(ws, baseAnnotated.length)
+                    if (we > ws) {
+                        addStyle(
+                            SpanStyle(
+                                background = Color(style.wordColor).copy(alpha = 0.45f),
+                                fontWeight = FontWeight.Bold
+                            ),
+                            ws, we
+                        )
+                    }
+                }
+            }
+        }
     }
 
     // A new chapter always starts at the top.
@@ -90,49 +129,78 @@ fun ScrollReaderView(
         )
     }
 
+    // Long-press -> character offset, mapped through stable layout APIs only
+    // (getLineForVertical + getHorizontalPosition), so no experimental API.
+    fun offsetAt(position: Offset): Int? {
+        val textLayout = layout ?: return null
+        if (position.y < 0f || position.y > textLayout.size.height.toFloat()) return null
+        val line = textLayout.getLineForVertical(position.y.toInt().coerceIn(0, textLayout.size.height))
+        if (line !in 0 until textLayout.lineCount) return null
+        val lineStart = textLayout.getLineStart(line)
+        val lineEnd = textLayout.getLineEnd(line)
+        var best = lineStart
+        var bestDistance = Float.MAX_VALUE
+        for (i in lineStart until lineEnd) {
+            val distance = abs(textLayout.getHorizontalPosition(i, false) - position.x)
+            if (distance < bestDistance) {
+                bestDistance = distance
+                best = i
+            }
+        }
+        return best
+    }
+
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         viewportHeight = with(LocalDensity.current) { maxHeight.toPx() }
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(androidx.compose.ui.graphics.Color(style.backgroundColor))
+                .background(Color(style.backgroundColor))
                 .verticalScroll(scrollState)
                 .padding(
                     horizontal = with(LocalDensity.current) { style.marginHorizontalPx.toDp() },
                     vertical = with(LocalDensity.current) { style.marginVerticalPx.toDp() }
                 )
         ) {
-        Text(
-            text = annotated,
-            style = TextStyle(
-                fontSize = ChapterAnnotator.fontSizeSp(prefs).sp,
-                lineHeight = ChapterAnnotator.lineHeightSp(style, prefs),
-                fontFamily = ChapterAnnotator.fontFamilyOf(prefs.fontFamily),
-                color = androidx.compose.ui.graphics.Color(style.textColor),
-                textAlign = TextAlign.Start
-            ),
-            onTextLayout = { layout = it },
-            modifier = Modifier.fillMaxWidth()
-        )
+            Text(
+                text = annotated,
+                style = TextStyle(
+                    fontSize = ChapterAnnotator.fontSizeSp(prefs).sp,
+                    lineHeight = ChapterAnnotator.lineHeightSp(style, prefs),
+                    fontFamily = ChapterAnnotator.fontFamilyOf(prefs.fontFamily),
+                    color = Color(style.textColor),
+                    textAlign = TextAlign.Start
+                ),
+                onTextLayout = { layout = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pointerInput(annotated) {
+                        detectTapGestures(
+                            onLongPress = { position ->
+                                offsetAt(position)?.let(onLongPress)
+                            }
+                        )
+                    }
+            )
 
-        // Chapter footer: continue to the next chapter with one tap.
-        Text(
-            text = if (chapterIndex + 1 < chapterCount) "—— 本章完 ——" else "—— 全书完 ——",
-            style = MaterialTheme.typography.bodySmall,
-            color = androidx.compose.ui.graphics.Color(style.textColor).copy(alpha = 0.6f),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 32.dp),
-            textAlign = TextAlign.Center
-        )
-        if (chapterIndex + 1 < chapterCount) {
-            TextButton(
-                onClick = onNextChapter,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("下一章")
+            // Chapter footer: continue to the next chapter with one tap.
+            Text(
+                text = if (chapterIndex + 1 < chapterCount) "—— 本章完 ——" else "—— 全书完 ——",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(style.textColor).copy(alpha = 0.6f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 32.dp),
+                textAlign = TextAlign.Center
+            )
+            if (chapterIndex + 1 < chapterCount) {
+                TextButton(
+                    onClick = onNextChapter,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("下一章")
+                }
             }
-        }
         }
     }
 }
